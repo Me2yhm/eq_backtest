@@ -138,3 +138,7 @@ Thumbs.db
 # OS files
 .env.local
 .env.*.local
+
+data/
+
+output_*

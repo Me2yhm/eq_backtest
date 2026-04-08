@@ -1,0 +1,17 @@
+[project]
+name = "bt-daily"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "polars",
+    "pyarrow>=23.0.1",
+    "fastparquet>=2026.3.0",
+]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
