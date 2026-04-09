@@ -31,7 +31,7 @@ if IS_SHORT:
     POOL_SIZE = 9999  # Effectively unlimited (all stocks)
     PORT_SIZES = [200, 300, 400]
 else:
-    POOL_SIZE = 3800
+    POOL_SIZE = 4400
     PORT_SIZES = [900]
 
 # thresh_out = port_size + THRESH_OUT_BUFFER  (hysteresis / exit buffer)
