@@ -38,7 +38,7 @@ else:
 THRESH_OUT_BUFFER = 500
 
 # ── Transaction cost (one-way) ────────────────────────────────────────────────
-COST_PER_TURNOVER = 0.0004
+COST_PER_TURNOVER = 0.00045
 
 # ── Period whose excess returns are zeroed (e.g. anomalous market condition) ──
 EXCLUDE_PERIOD = ("2024-01-01", "2024-03-31")
