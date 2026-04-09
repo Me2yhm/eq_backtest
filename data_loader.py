@@ -18,7 +18,6 @@ import pandas as pd
 def load_benchmark(path: Path) -> pd.Series:
     """Load a CSV of daily benchmark returns into a Series."""
     result = pd.read_csv(path, index_col=0, parse_dates=True).squeeze()
-    result = result.shift(-1).dropna()  # Align with open-to-open returns (t+1)
     return pd.Series(result)
 
 
