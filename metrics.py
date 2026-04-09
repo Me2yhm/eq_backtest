@@ -61,33 +61,47 @@ def holding_period_stats(positions: pd.DataFrame) -> dict:
         max_open    – longest currently held position
         avg_closed  – average days held for positions closed on that day
     """
-    entry_day: dict = {}  # symbol -> day index when it was opened
+    idx = positions.index
+    dates = idx.get_level_values("date").to_numpy()
+    symbols = idx.get_level_values("symbol").to_numpy(dtype=object)
+
+    if len(dates) == 0:
+        empty = pd.Series(dtype=float)
+        return {
+            "avg_open": empty,
+            "median_open": empty,
+            "max_open": empty,
+            "avg_closed": empty,
+        }
+
+    change_points = np.flatnonzero(dates[1:] != dates[:-1]) + 1
+    starts = np.concatenate(([0], change_points))
+    ends = np.concatenate((change_points, [len(dates)]))
+    unique_dates = dates[starts]
+
+    entry_day: dict = {}
     prev_symbols: set = set()
     avg_open, med_open, max_open, avg_closed = {}, {}, {}, {}
 
-    dates = sorted(positions.index.get_level_values("date").unique())
-
-    for day_n, date in enumerate(dates):
-        today = set(positions.loc[date].index)
+    for day_n, (date, start, end) in enumerate(zip(unique_dates, starts, ends)):
+        today = set(symbols[start:end])
         exited = prev_symbols - today
 
-        # Holding days for positions closed today
         closed_days = [day_n - entry_day[s] for s in exited if s in entry_day]
         if closed_days:
-            avg_closed[date] = np.mean(closed_days)
+            avg_closed[pd.Timestamp(date)] = np.mean(closed_days)
         for s in exited:
             entry_day.pop(s, None)
 
-        # Record entry day for newly opened positions
         for s in today - prev_symbols:
             entry_day[s] = day_n
 
-        # Holding days for all currently open positions
         open_days = [day_n - entry_day[s] + 1 for s in today if s in entry_day]
         if open_days:
-            avg_open[date] = np.mean(open_days)
-            med_open[date] = np.median(open_days)
-            max_open[date] = max(open_days)
+            ts = pd.Timestamp(date)
+            avg_open[ts] = np.mean(open_days)
+            med_open[ts] = np.median(open_days)
+            max_open[ts] = max(open_days)
 
         prev_symbols = today
 

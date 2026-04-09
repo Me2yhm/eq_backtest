@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 import pandas as pd
+import polars as pl
 
 import config as cfg
 from data_loader import build_pool
@@ -26,9 +27,9 @@ from portfolio import generate_portfolio
 
 
 def compute_returns(
-    positions: pd.DataFrame,
+    portfolio_returns: pd.Series,
+    turnover: pd.Series,
     bm_ret: pd.Series,
-    port_size: int,
     is_short: bool,
     cost: float,
     exclude_period: tuple | None,
@@ -44,20 +45,8 @@ def compute_returns(
     excess_ret : daily excess return Series
     turnover   : daily one-way turnover Series
     """
-    port_ret = positions.groupby("date")["ret"].sum() / port_size
-
-    # Equal weights (1/N per stock, 0 when not held)
-    weights = (
-        pd.Series(1 / port_size, index=positions.index, name="w")
-        .reset_index()
-        .pivot(index="date", columns="symbol")
-        .fillna(0)
-    )
-    trades = weights.diff().abs()
-    trades.iloc[0] = weights.iloc[0].abs()
-    turnover = trades.sum(axis=1)
-
-    excess = (bm_ret - port_ret) if is_short else (port_ret - bm_ret)
+    bm_aligned = bm_ret.reindex(portfolio_returns.index)
+    excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
     excess -= turnover.mul(cost)
 
     if exclude_period:
@@ -66,6 +55,11 @@ def compute_returns(
         excess.loc[(excess.index >= lo) & (excess.index < hi)] = 0.0
 
     return excess, turnover
+
+
+def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
+    frame = pl.from_pandas(positions.reset_index()).with_columns(pl.col("date").cast(pl.Date))
+    frame.write_csv(output_path)
 
 
 # ── Logging helper ─────────────────────────────────────────────────────────────
@@ -107,7 +101,7 @@ def run() -> None:
     for port_size in cfg.PORT_SIZES:
         print(f"\n── Portfolio size: {port_size} ──")
 
-        positions, close_counts = generate_portfolio(
+        result = generate_portfolio(
             pool=pool,
             port_size=port_size,
             thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
@@ -117,12 +111,14 @@ def run() -> None:
             output_dir=output_dir,
         )
 
-        positions.to_csv(f"{output_dir}positions_{port_size}.csv")
+        positions = result.positions
+        close_counts = result.close_counts
+        _write_positions_csv(positions, f"{output_dir}positions_{port_size}.csv")
 
         excess, turnover = compute_returns(
-            positions,
+            result.portfolio_returns,
+            result.turnover,
             bm_ret,
-            port_size,
             is_short=cfg.IS_SHORT,
             cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
@@ -133,7 +129,7 @@ def run() -> None:
         all_metrics[port_size] = m
         all_ret[port_size] = excess.rename(f"Port_{port_size}")
         all_cumrets[port_size] = excess.cumsum().rename(f"Port_{port_size}")
-        all_port_sizes[port_size] = positions.groupby("date").size().rename(f"Port_{port_size}")
+        all_port_sizes[port_size] = result.held_counts.rename(f"Port_{port_size}")
 
         if not close_counts.empty:
             close_counts.columns = [f"Port_{port_size}"]
