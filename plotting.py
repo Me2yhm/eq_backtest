@@ -190,7 +190,7 @@ def plot_portfolio_results(
     plt.tight_layout()
     pdir = _ensure_plot_dir(output_path, is_short)
     fig.savefig(os.path.join(pdir, "portfolio_results.png"), dpi=300, bbox_inches="tight")
-    plt.show()
+    # plt.show()
 
 
 # ── Metrics table image ───────────────────────────────────────────────────────

@@ -176,4 +176,9 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    import time
+
+    start_time = time.time()
     run()
+    end_time = time.time()
+    print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
