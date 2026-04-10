@@ -8,6 +8,8 @@ build_pool(...)  ->  (BacktestDataset, benchmark Series)
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -31,6 +33,9 @@ MARKET_REQUIRED_COLUMNS = {
     "is_ST",
     "normal_days",
 }
+
+POOL_CACHE_VERSION = 1
+CACHED_POOL_REQUIRED_COLUMNS = MARKET_REQUIRED_COLUMNS | {"pred", "tradable", "can_open", "row_idx", "symbol_id"}
 
 
 @dataclass(slots=True)
@@ -69,6 +74,13 @@ def load_benchmark(path: Path) -> pd.Series:
 def _horizon_suffix(path: Path) -> str:
     """Extract the horizon tag after the last underscore (e.g. '3d' from 'model_3d.parquet')."""
     return path.stem.rsplit("_", 1)[-1] if "_" in path.stem else ""
+
+
+def _prediction_files(preds_dir: Path, horizons: list) -> list[Path]:
+    files = sorted(f for f in preds_dir.glob("*.parquet") if _horizon_suffix(f) in horizons)
+    if not files:
+        raise FileNotFoundError(f"No parquet files matching horizons {horizons} found in '{preds_dir}'")
+    return files
 
 
 def _normalize_prediction_dates(frame: pl.DataFrame) -> tuple[pl.DataFrame, str]:
@@ -153,9 +165,7 @@ def load_predictions(preds_dir: Path, horizons: list, start: str) -> pl.DataFram
     Each parquet file must be a wide DataFrame (index=date, columns=symbol).
     Returns a long Polars DataFrame with columns [date, symbol, pred].
     """
-    files = [f for f in preds_dir.glob("*.parquet") if _horizon_suffix(f) in horizons]
-    if not files:
-        raise FileNotFoundError(f"No parquet files matching horizons {horizons} found in '{preds_dir}'")
+    files = _prediction_files(preds_dir, horizons)
     print(f"Predictions: {len(files)} file(s) loaded – {[f.name for f in files]}")
 
     try:
@@ -222,10 +232,13 @@ def load_market_data(
 # ── Combined entry point ───────────────────────────────────────────────────────
 
 
-def _encode_dataset(pool: pl.DataFrame) -> BacktestDataset:
-    symbol_values = pool["symbol"].unique().sort().to_list()
-    symbol_map = pl.DataFrame({"symbol": symbol_values}).with_row_index("symbol_id")
-    encoded = pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx")
+def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
+    missing = sorted(CACHED_POOL_REQUIRED_COLUMNS.difference(encoded.columns))
+    if missing:
+        raise ValueError(f"Cached pool frame is missing required columns {missing}")
+
+    symbol_table = encoded.select(["symbol_id", "symbol"]).unique(maintain_order=True).sort("symbol_id")
+    symbol_values = symbol_table["symbol"].to_list()
 
     date_counts = encoded.group_by("date", maintain_order=True).len()
     dates = date_counts["date"].to_numpy()
@@ -249,6 +262,54 @@ def _encode_dataset(pool: pl.DataFrame) -> BacktestDataset:
     )
 
 
+def _encode_dataset(pool: pl.DataFrame) -> BacktestDataset:
+    symbol_values = pool["symbol"].unique().sort().to_list()
+    symbol_map = pl.DataFrame({"symbol": symbol_values}).with_row_index("symbol_id")
+    encoded = pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx")
+
+    return _dataset_from_encoded_frame(encoded)
+
+
+def _file_signature(path: Path) -> dict[str, int | str]:
+    stat = path.stat()
+    return {
+        "path": path.resolve().as_posix(),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def _pool_cache_path(
+    cache_dir: Path,
+    data_path: Path,
+    pred_files: list[Path],
+    start: str,
+    universe: list | None,
+    allow_st_open: bool,
+) -> Path:
+    payload = {
+        "version": POOL_CACHE_VERSION,
+        "data": _file_signature(data_path),
+        "predictions": [_file_signature(path) for path in pred_files],
+        "start": start,
+        "universe": list(universe) if universe is not None else None,
+        "allow_st_open": allow_st_open,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return cache_dir / f"pool_{digest}.parquet"
+
+
+def _read_cached_pool(cache_path: Path) -> BacktestDataset | None:
+    if not cache_path.exists():
+        return None
+
+    try:
+        encoded = pl.read_parquet(cache_path)
+        return _dataset_from_encoded_frame(encoded)
+    except Exception:
+        return None
+
+
 def build_pool(
     data_path: Path,
     preds_dir: Path,
@@ -257,6 +318,8 @@ def build_pool(
     start: str,
     universe: list | None,
     allow_st_open: bool,
+    use_cache: bool = True,
+    cache_dir: Path | None = None,
 ) -> tuple[BacktestDataset, pd.Series]:
     """
     Assemble the full pool and benchmark return series.
@@ -267,10 +330,34 @@ def build_pool(
     bm_ret : Series of daily benchmark returns
     """
     bm_ret = load_benchmark(bm_path)
-    preds = load_predictions(preds_dir, horizons, start)
+
+    pred_files = _prediction_files(preds_dir, horizons)
+    resolved_cache_dir = cache_dir if cache_dir is not None else data_path.parent / ".cache"
+    cache_path = _pool_cache_path(resolved_cache_dir, data_path, pred_files, start, universe, allow_st_open)
+
+    if use_cache:
+        cached_dataset = _read_cached_pool(cache_path)
+        if cached_dataset is not None:
+            print(f"Pool cache: hit – {cache_path.name}")
+            return cached_dataset, bm_ret
+        print(f"Pool cache: miss – {cache_path.name}")
+
+    print(f"Predictions: {len(pred_files)} file(s) loaded – {[f.name for f in pred_files]}")
+    try:
+        preds = _load_predictions_wide_mean(pred_files, start)
+    except PredictionAlignmentError:
+        preds = _load_predictions_long_form(pred_files, start)
+
     market = load_market_data(data_path, start, universe, allow_st_open)
     pool = market.join(preds, on=["date", "symbol"], how="left")
-    return _encode_dataset(pool), bm_ret
+    dataset = _encode_dataset(pool)
+
+    if use_cache:
+        resolved_cache_dir.mkdir(parents=True, exist_ok=True)
+        dataset.pool_frame.write_parquet(cache_path)
+        print(f"Pool cache: wrote – {cache_path.name}")
+
+    return dataset, bm_ret
 
 
 if __name__ == "__main__":
@@ -284,6 +371,8 @@ if __name__ == "__main__":
         start=cfg.START,
         universe=cfg.UNIVERSE,
         allow_st_open=cfg.ALLOW_ST_OPEN,
+        use_cache=cfg.USE_POOL_CACHE,
+        cache_dir=cfg.POOL_CACHE_DIR,
     )
     print(bm_ret.head())
     print(dataset.pool_frame.head())

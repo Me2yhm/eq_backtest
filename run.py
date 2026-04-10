@@ -89,6 +89,8 @@ def run() -> None:
         start=cfg.START,
         universe=cfg.UNIVERSE,
         allow_st_open=cfg.ALLOW_ST_OPEN,
+        use_cache=cfg.USE_POOL_CACHE,
+        cache_dir=cfg.POOL_CACHE_DIR,
     )
 
     # ── Run for each portfolio size ───────────────────────────────────────────

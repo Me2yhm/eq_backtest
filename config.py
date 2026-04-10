@@ -12,6 +12,8 @@ START = "2019-01-01"
 DATA_PATH = Path("data/daily.pqt")
 PREDS_DIR = Path("data/preds_size")
 BM_PATH = Path("data/bm_open/ret_csi_1000.csv")
+POOL_CACHE_DIR = Path("data/.cache")
+USE_POOL_CACHE = True
 
 # ── Prediction horizons to average ───────────────────────────────────────────
 HORIZONS = ["3d", "5d", "10d"]
