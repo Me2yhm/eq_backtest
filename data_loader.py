@@ -62,7 +62,9 @@ class BacktestDataset:
 def load_benchmark(path: Path) -> pd.Series:
     """Load a CSV of daily benchmark returns into a Series."""
     frame = pl.read_csv(path)
-    if frame["date"].dtype == pl.String:
+    if "date" not in frame.columns:
+        frame = frame.with_columns(pl.col(frame.columns[0]).cast(pl.Date).alias("date"))
+    elif frame["date"].dtype == pl.String:
         frame = frame.with_columns(pl.col("date").str.strptime(pl.Date, "%m/%d/%Y", strict=False))
 
     result = frame.sort("date").to_pandas().set_index("date")["ret"].rename("ret")
