@@ -16,7 +16,8 @@ uv sync                 # 根据 pyproject.toml 安装依赖
 ### 运行回测
 
 ```bash
-python run.py
+.venv\Scripts\python.exe run.py # Windows
+.venv/bin/python run.py # Linux
 ```
 
 回测结果（指标 CSV、收益率 CSV、持仓 CSV、图表）会写入 `config.py` 中 `OUTPUT_DIR` 指定的目录，默认为 `output_long_4400/`。
