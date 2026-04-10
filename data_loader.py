@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import polars as pl
+from loguru import logger
 
 MARKET_REQUIRED_COLUMNS = {
     "symbol",
@@ -166,7 +167,7 @@ def load_predictions(preds_dir: Path, horizons: list, start: str) -> pl.DataFram
     Returns a long Polars DataFrame with columns [date, symbol, pred].
     """
     files = _prediction_files(preds_dir, horizons)
-    print(f"Predictions: {len(files)} file(s) loaded – {[f.name for f in files]}")
+    logger.info("Predictions: {} file(s) loaded – {}", len(files), [f.name for f in files])
 
     try:
         return _load_predictions_wide_mean(files, start)
@@ -338,11 +339,11 @@ def build_pool(
     if use_cache:
         cached_dataset = _read_cached_pool(cache_path)
         if cached_dataset is not None:
-            print(f"Pool cache: hit – {cache_path.name}")
+            logger.debug("Pool cache: hit – {}", cache_path.name)
             return cached_dataset, bm_ret
-        print(f"Pool cache: miss – {cache_path.name}")
+        logger.debug("Pool cache: miss – {}", cache_path.name)
 
-    print(f"Predictions: {len(pred_files)} file(s) loaded – {[f.name for f in pred_files]}")
+    logger.info("Predictions: {} file(s) loaded – {}", len(pred_files), [f.name for f in pred_files])
     try:
         preds = _load_predictions_wide_mean(pred_files, start)
     except PredictionAlignmentError:
@@ -355,7 +356,7 @@ def build_pool(
     if use_cache:
         resolved_cache_dir.mkdir(parents=True, exist_ok=True)
         dataset.pool_frame.write_parquet(cache_path)
-        print(f"Pool cache: wrote – {cache_path.name}")
+        logger.debug("Pool cache: wrote – {}", cache_path.name)
 
     return dataset, bm_ret
 
@@ -374,5 +375,5 @@ if __name__ == "__main__":
         use_cache=cfg.USE_POOL_CACHE,
         cache_dir=cfg.POOL_CACHE_DIR,
     )
-    print(bm_ret.head())
-    print(dataset.pool_frame.head())
+    logger.debug("bm_ret head:\n{}", bm_ret.head())
+    logger.debug("pool_frame head:\n{}", dataset.pool_frame.head())

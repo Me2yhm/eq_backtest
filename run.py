@@ -12,6 +12,7 @@ import os
 
 import pandas as pd
 import polars as pl
+from loguru import logger
 
 import config as cfg
 from data_loader import build_pool
@@ -68,9 +69,9 @@ def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
 def _log_holding_stats(stats: dict, port_size: int) -> None:
     avg_open = stats["avg_open"]
     avg_closed = stats["avg_closed"]
-    print(f"  Holding (open):   avg {avg_open.mean():.1f} d, median {avg_open.median():.1f} d")
+    logger.info("Holding (open):   avg {:.1f} d, median {:.1f} d", avg_open.mean(), avg_open.median())
     if not avg_closed.empty:
-        print(f"  Holding (closed): avg {avg_closed.mean():.1f} d")
+        logger.info("Holding (closed): avg {:.1f} d", avg_closed.mean())
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -101,7 +102,7 @@ def run() -> None:
     all_closes = {}
 
     for port_size in cfg.PORT_SIZES:
-        print(f"\n── Portfolio size: {port_size} ──")
+        logger.info("── Portfolio size: {} ──", port_size)
 
         result = generate_portfolio(
             pool=pool,
@@ -154,8 +155,7 @@ def run() -> None:
     cumrets_df.to_csv(f"{output_dir}cumrets_{tag}.csv")
     ret_df.to_csv(f"{output_dir}returns_{tag}.csv")
 
-    print("\n── Metrics ──")
-    print(metrics_df.to_string())
+    logger.info("── Metrics ──\n{}", metrics_df.to_string())
 
     plot_portfolio_results(
         cumrets_df,
@@ -179,4 +179,4 @@ if __name__ == "__main__":
     start_time = time.time()
     run()
     end_time = time.time()
-    print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
+    logger.info("Total execution time: {:.2f} seconds", end_time - start_time)

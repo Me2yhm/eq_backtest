@@ -12,6 +12,7 @@ dependencies = [
     "polars",
     "pyarrow>=23.0.1",
     "fastparquet>=2026.3.0",
+    "loguru>=0.7.3",
 ]
 
 [[tool.uv.index]]
