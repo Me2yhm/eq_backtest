@@ -23,7 +23,8 @@ HORIZONS = ["3d", "5d", "10d"]
 BM_NAME = "csi_1000"
 
 # ── Stock universe (index membership required to open a position) ─────────────
-UNIVERSE = ["000300.XSHG", "000905.XSHG", "000852.XSHG"]
+# UNIVERSE = ["000300.XSHG", "000905.XSHG", "000852.XSHG"]
+UNIVERSE = None
 
 # ── Strategy direction ────────────────────────────────────────────────────────
 IS_SHORT = False  # True: short bottom-ranked stocks; False: long top-ranked
