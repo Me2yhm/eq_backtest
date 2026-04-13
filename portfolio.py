@@ -75,6 +75,7 @@ def _simulate_portfolio_core(
     thresh_out: int,
     size_cut: int,
     close_on_size_drop: bool,
+    strict_first_day_top_n: bool,
 ) -> tuple:
     n_days = len(day_offsets) - 1
 
@@ -151,7 +152,8 @@ def _simulate_portfolio_core(
 
             row_idx = sorted_rows[pos]
             symbol_id = row_symbol_ids[row_idx]
-            if day_idx == 0 and rank_by_symbol[symbol_id] > port_size:
+
+            if day_idx == 0 and strict_first_day_top_n and rank_by_symbol[symbol_id] > port_size:
                 continue
 
             if size_rank[row_idx] < size_cut and can_open[row_idx] and not held[symbol_id]:
@@ -309,6 +311,7 @@ def generate_portfolio(
     thresh_out_buffer: int = 200,
     size_cut: int = 9999,
     close_on_size_drop: bool = True,
+    strict_first_day_top_n: bool = False,
     is_short: bool = True,
     plot_heatmap: bool = True,
     output_dir: str = "output/",
@@ -329,6 +332,7 @@ def generate_portfolio(
     thresh_out_buffer : exit trigger = port_size + thresh_out_buffer
     size_cut          : market-cap rank upper bound for the eligible universe
     close_on_size_drop: also close when a stock falls outside size_cut
+    strict_first_day_top_n: if True, day 0 only opens names ranked within the top port_size window
     is_short          : rank ascending if True (short worst), descending if False (long best)
     plot_heatmap      : save a size-rank distribution heatmap to output_dir
 
@@ -363,6 +367,7 @@ def generate_portfolio(
         thresh_out=thresh_out,
         size_cut=size_cut,
         close_on_size_drop=close_on_size_drop,
+        strict_first_day_top_n=strict_first_day_top_n,
     )
 
     positions = _materialize_positions(

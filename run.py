@@ -110,6 +110,7 @@ def run() -> None:
             thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
             size_cut=cfg.POOL_SIZE,
             close_on_size_drop=True,
+            strict_first_day_top_n=cfg.STRICT_FIRST_DAY_TOP_N,
             is_short=cfg.IS_SHORT,
             output_dir=output_dir,
         )

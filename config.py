@@ -38,6 +38,7 @@ else:
 
 # thresh_out = port_size + THRESH_OUT_BUFFER  (hysteresis / exit buffer)
 THRESH_OUT_BUFFER = 500
+STRICT_FIRST_DAY_TOP_N = False  # True: first day only opens from strict top-N ranks; False: keep scanning until full
 
 # ── Transaction cost (one-way) ────────────────────────────────────────────────
 COST_PER_TURNOVER = 0.00045
