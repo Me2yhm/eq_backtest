@@ -78,6 +78,7 @@ eq-backtest/
 | `POOL_SIZE` | `4400` | 候选池大小（按预测排名取前 N） |
 | `PORT_SIZES` | `[900]` | 实际持仓数量列表，支持多组并行回测 |
 | `THRESH_OUT_BUFFER` | `500` | 退出缓冲（持仓滑出排名 `port_size + buffer` 才平仓） |
+| `TRADE_ON_NEXT_DAY` | `True` | `True`：T 日信号在 T+1 日执行，首日只生成信号不建仓；`False`：同日信号、同日持仓 |
 | `STRICT_FIRST_DAY_TOP_N` | `False` | `True`：首日只允许从严格 top N 信号窗口开仓；`False`：首日继续向后扫描直到尽量补满持仓 |
 | `COST_PER_TURNOVER` | `0.00045` | 单边交易成本（每换手单位扣减） |
 | `EXCLUDE_PERIOD` | `("2024-01-01","2024-03-31")` | 超额收益归零的异常区间，设为 `None` 关闭 |

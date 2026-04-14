@@ -6,7 +6,7 @@ All tunable parameters live here; no other file should define constants.
 from pathlib import Path
 
 # ── Time range ────────────────────────────────────────────────────────────────
-START = "2019-01-01"
+START = "2019-01-02"
 
 # ── Data paths ────────────────────────────────────────────────────────────────
 # DATA_PATH = Path("data/daily.pqt")
@@ -28,7 +28,7 @@ UNIVERSE = None
 
 # ── Strategy direction ────────────────────────────────────────────────────────
 IS_SHORT = False  # True: short bottom-ranked stocks; False: long top-ranked
-ALLOW_ST_OPEN = True  # Allow opening positions in ST-designated stocks
+ALLOW_ST_OPEN = False  # Allow opening positions in ST-designated stocks
 
 # ── Candidate pool and portfolio sizes ────────────────────────────────────────
 if IS_SHORT:
@@ -40,6 +40,7 @@ else:
 
 # thresh_out = port_size + THRESH_OUT_BUFFER  (hysteresis / exit buffer)
 THRESH_OUT_BUFFER = 500
+TRADE_ON_NEXT_DAY = True  # True: day T signals are executed on day T+1; False: same-day signal/same-day portfolio
 STRICT_FIRST_DAY_TOP_N = False  # True: first day only opens from strict top-N ranks; False: keep scanning until full
 
 # ── Transaction cost (one-way) ────────────────────────────────────────────────
