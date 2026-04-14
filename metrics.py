@@ -30,7 +30,7 @@ def portfolio_metrics(daily_returns: pd.Series, risk_free_rate: float = 0.0) -> 
     """
     years = len(daily_returns) / ANN_DAYS
     cum_ret: float = (1 + daily_returns).prod()  # type: ignore[assignment]
-    ann_ret = (1 + cum_ret) ** (1 / years) - 1
+    ann_ret = cum_ret ** (1 / years) - 1
 
     vol = daily_returns.std() * np.sqrt(ANN_DAYS)
     sharpe = (ann_ret - risk_free_rate) / vol if vol else np.nan
