@@ -66,6 +66,9 @@ def _simulate_portfolio_core(
     sorted_offsets: np.ndarray,
     row_symbol_ids: np.ndarray,
     ret: np.ndarray,
+    close_ex: np.ndarray,
+    vwap30: np.ndarray,
+    vwap30ori: np.ndarray,
     size_rank: np.ndarray,
     tradable: np.ndarray,
     can_close: np.ndarray,
@@ -78,6 +81,7 @@ def _simulate_portfolio_core(
     close_on_size_drop: bool,
     strict_first_day_top_n: bool,
     trade_on_next_day: bool,
+    is_short: bool,
 ) -> tuple:
     n_days = len(day_offsets) - 1
     first_execution_day = 1 if trade_on_next_day else 0
@@ -88,9 +92,18 @@ def _simulate_portfolio_core(
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
     signal_can_open_pool = np.zeros(n_symbols, dtype=np.bool_)
+    signal_row_by_symbol = np.full(n_symbols, -1, dtype=np.int64)
+    prev_day_row = np.full(n_symbols, -1, dtype=np.int64)
     held_symbols = np.full(port_size, -1, dtype=np.int32)
+    shares_prev = np.zeros(n_symbols, dtype=np.float64)
+    shares_curr = np.zeros(n_symbols, dtype=np.float64)
+    prev_share_symbols = np.full(n_symbols, -1, dtype=np.int32)
+    curr_share_symbols = np.full(port_size, -1, dtype=np.int32)
+    touched = np.zeros(n_symbols, dtype=np.bool_)
+    touched_symbols = np.full(n_symbols, -1, dtype=np.int32)
 
     held_count = 0
+    prev_share_count = 0
     close_counts = np.zeros(n_days, dtype=np.int32)
     daily_turnover = np.zeros(n_days, dtype=np.float64)
     daily_returns = np.zeros(n_days, dtype=np.float64)
@@ -104,13 +117,14 @@ def _simulate_portfolio_core(
     rec_ret = np.empty(record_capacity, dtype=np.float64)
     rec_tradable = np.empty(record_capacity, dtype=np.bool_)
     rec_count = 0
+    portfolio_sign = -1.0 if is_short else 1.0
 
     for day_idx in range(n_days):
-        prev_held = held.copy()
         current_row[:] = -1
         rank_by_symbol[:] = 0
         signal_in_size_pool[:] = False
         signal_can_open_pool[:] = False
+        signal_row_by_symbol[:] = -1
 
         day_start = day_offsets[day_idx]
         day_end = day_offsets[day_idx + 1]
@@ -124,6 +138,12 @@ def _simulate_portfolio_core(
         order_end = 0
 
         if has_signal:
+            signal_day_start = day_offsets[signal_day_idx]
+            signal_day_end = day_offsets[signal_day_idx + 1]
+            for row_idx in range(signal_day_start, signal_day_end):
+                symbol_id = row_symbol_ids[row_idx]
+                signal_row_by_symbol[symbol_id] = row_idx
+
             rank = 0
             order_start = sorted_offsets[signal_day_idx]
             order_end = sorted_offsets[signal_day_idx + 1]
@@ -188,14 +208,113 @@ def _simulate_portfolio_core(
                     n_opened += 1
 
         close_counts[day_idx] = n_closed
-        changed_count = 0
-        for symbol_id in range(n_symbols):
-            if held[symbol_id] != prev_held[symbol_id]:
-                changed_count += 1
-        daily_turnover[day_idx] = changed_count / port_size
+
+        if has_signal:
+            curr_share_count = 0
+            target_weight = 0.0
+            if held_count > 0:
+                target_weight = portfolio_sign / held_count
+
+            for i in range(held_count):
+                symbol_id = held_symbols[i]
+                signal_row_idx = signal_row_by_symbol[symbol_id]
+                if signal_row_idx == -1:
+                    continue
+
+                signal_close = close_ex[signal_row_idx]
+                if np.isfinite(signal_close) and signal_close != 0.0:
+                    share = target_weight / signal_close
+                    shares_curr[symbol_id] = share
+                    curr_share_symbols[curr_share_count] = symbol_id
+                    curr_share_count += 1
+
+            touched_count = 0
+            for i in range(prev_share_count):
+                symbol_id = prev_share_symbols[i]
+                if not touched[symbol_id]:
+                    touched[symbol_id] = True
+                    touched_symbols[touched_count] = symbol_id
+                    touched_count += 1
+            for i in range(curr_share_count):
+                symbol_id = curr_share_symbols[i]
+                if not touched[symbol_id]:
+                    touched[symbol_id] = True
+                    touched_symbols[touched_count] = symbol_id
+                    touched_count += 1
+
+            prev_total_mv = 0.0
+            overnight_pl = 0.0
+            intraday_pl = 0.0
+            trading_notional = 0.0
+
+            for i in range(touched_count):
+                symbol_id = touched_symbols[i]
+                touched[symbol_id] = False
+
+                prev_shares = shares_prev[symbol_id]
+                curr_shares = shares_curr[symbol_id]
+
+                prev_row_idx = prev_day_row[symbol_id]
+                exec_row_idx = current_row[symbol_id]
+
+                prev_close = np.nan
+                if prev_row_idx != -1:
+                    prev_close = close_ex[prev_row_idx]
+
+                if np.isfinite(prev_close):
+                    prev_total_mv += abs(prev_shares) * prev_close
+
+                if prev_shares != 0.0 and prev_row_idx != -1 and exec_row_idx != -1:
+                    exec_vwap = vwap30[exec_row_idx]
+                    if np.isfinite(exec_vwap) and np.isfinite(prev_close):
+                        overnight_pl += prev_shares * (exec_vwap - prev_close)
+
+                if curr_shares != 0.0 and exec_row_idx != -1:
+                    exec_vwap = vwap30[exec_row_idx]
+                    exec_close = close_ex[exec_row_idx]
+                    if np.isfinite(exec_vwap) and np.isfinite(exec_close):
+                        intraday_pl += curr_shares * (exec_close - exec_vwap)
+
+                if exec_row_idx != -1:
+                    exec_vwap30ori = vwap30ori[exec_row_idx]
+                    if np.isfinite(exec_vwap30ori):
+                        trading_notional += abs(curr_shares - prev_shares) * exec_vwap30ori
+
+            if prev_total_mv <= 0.0:
+                for i in range(curr_share_count):
+                    symbol_id = curr_share_symbols[i]
+                    exec_row_idx = current_row[symbol_id]
+                    if exec_row_idx != -1:
+                        exec_close = close_ex[exec_row_idx]
+                        if np.isfinite(exec_close):
+                            prev_total_mv += abs(shares_curr[symbol_id]) * exec_close
+
+            denominator = prev_total_mv if prev_total_mv > 0.0 else 1.0
+            daily_returns[day_idx] = (overnight_pl + intraday_pl) / denominator
+            daily_turnover[day_idx] = trading_notional / denominator
+
+            for i in range(prev_share_count):
+                symbol_id = prev_share_symbols[i]
+                if shares_curr[symbol_id] == 0.0:
+                    shares_prev[symbol_id] = 0.0
+
+            next_prev_share_count = 0
+            for i in range(curr_share_count):
+                symbol_id = curr_share_symbols[i]
+                shares_prev[symbol_id] = shares_curr[symbol_id]
+                prev_share_symbols[next_prev_share_count] = symbol_id
+                next_prev_share_count += 1
+                shares_curr[symbol_id] = 0.0
+
+            prev_share_count = next_prev_share_count
+        else:
+            for i in range(prev_share_count):
+                symbol_id = prev_share_symbols[i]
+                shares_prev[symbol_id] = 0.0
+            prev_share_count = 0
+
         held_counts[day_idx] = held_count
 
-        day_ret_sum = 0.0
         for i in range(held_count):
             symbol_id = held_symbols[i]
             row_idx = current_row[symbol_id]
@@ -219,10 +338,9 @@ def _simulate_portfolio_core(
                 else:
                     rec_pred_rank[rec_count] = np.nan
 
-            day_ret_sum += rec_ret[rec_count]
             rec_count += 1
 
-        daily_returns[day_idx] = day_ret_sum / port_size
+        prev_day_row[:] = current_row
 
     return (
         rec_date_idx[:rec_count],
@@ -387,6 +505,9 @@ def generate_portfolio(
         sorted_offsets=sorted_offsets,
         row_symbol_ids=pool.row_symbol_ids,
         ret=pool.ret,
+        close_ex=pool.close_ex,
+        vwap30=pool.vwap30,
+        vwap30ori=pool.vwap30ori,
         size_rank=pool.size_rank,
         tradable=pool.tradable,
         can_close=can_close_exec,
@@ -399,6 +520,7 @@ def generate_portfolio(
         close_on_size_drop=close_on_size_drop,
         strict_first_day_top_n=strict_first_day_top_n,
         trade_on_next_day=trade_on_next_day,
+        is_short=is_short,
     )
 
     positions = _materialize_positions(

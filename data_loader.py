@@ -33,9 +33,12 @@ MARKET_REQUIRED_COLUMNS = {
     "listed_Satisfied",
     "is_ST",
     "normal_days",
+    "vwap30ori",
+    "close_ex",
+    "vwap30",
 }
 
-POOL_CACHE_VERSION = 2
+POOL_CACHE_VERSION = 3
 CACHED_POOL_REQUIRED_COLUMNS = MARKET_REQUIRED_COLUMNS | {
     "pred",
     "tradable",
@@ -65,6 +68,9 @@ class BacktestDataset:
     can_trade_buy: np.ndarray
     can_trade_sell: np.ndarray
     can_open_base: np.ndarray
+    close_ex: np.ndarray
+    vwap30: np.ndarray
+    vwap30ori: np.ndarray
     sort_cache: dict[bool, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
 
 
@@ -284,6 +290,9 @@ def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
         can_trade_buy=encoded["can_trade_buy"].to_numpy().astype(np.bool_, copy=False),
         can_trade_sell=encoded["can_trade_sell"].to_numpy().astype(np.bool_, copy=False),
         can_open_base=encoded["can_open_base"].to_numpy().astype(np.bool_, copy=False),
+        close_ex=encoded["close_ex"].to_numpy().astype(np.float64, copy=False),
+        vwap30=encoded["vwap30"].to_numpy().astype(np.float64, copy=False),
+        vwap30ori=encoded["vwap30ori"].to_numpy().astype(np.float64, copy=False),
     )
 
 

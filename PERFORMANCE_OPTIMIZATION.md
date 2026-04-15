@@ -2,6 +2,40 @@
 
 ## 总结
 
+## 2026-04-14 两阶段 PnL 性能回归修复
+
+在引入两阶段收益口径后，`generate_portfolio` 的实现一度回退到 Python/pandas 后处理路径，导致热缓存命中场景从约 `4s` 上升到约 `22s`。
+
+本次修复将两阶段收益与交易成本计算完全并回 Numba 主循环，避免了逐日字典构建与 Python 层 symbol 迭代。
+
+### 修复前后（热缓存命中）
+
+| 阶段 | 修复前 | 修复后 | 节省时间 | 加速倍数 |
+| --- | ---: | ---: | ---: | ---: |
+| `generate_portfolio` | 19.72s | 1.36s | 18.36s | 14.50x |
+| `build_pool` | 0.80s | 0.89s | -0.09s | 0.90x |
+| `compute_returns` | 0.00s | 0.01s | -0.01s | 0.44x |
+| 三段合计 | 20.53s | 2.25s | 18.28s | 9.11x |
+
+### 关键实现变更
+
+- `BacktestDataset` 直接暴露 `close_ex`、`vwap30`、`vwap30ori` 的 NumPy 数组，避免从 `pool_frame` 转 pandas 再查价。
+- `_simulate_portfolio_core` 内部直接计算两阶段日收益：
+	- 隔夜段：`close_ex(t-1) -> vwap30(t)`
+	- 日内段：`vwap30(t) -> close_ex(t)`
+- 交易成本口径在同一核心循环中计算：`abs(Δshares) * vwap30ori(t)`，并按 `prev_total_mv` 归一化成 `daily_tto`。
+- 移除了 Python 侧 `_compute_two_stage_portfolio_series`，`generate_portfolio` 直接消费 Numba 输出的 `portfolio_returns` 与 `turnover`。
+
+### 数值一致性验证
+
+以 `output_long_4400/portfolio_pnl_900.csv` 为基准，优化后结果与修复前两阶段实现保持一致（误差仅为浮点噪声）：
+
+| 列 | MAE | Max Abs |
+| --- | ---: | ---: |
+| `daily_strategy` | 2.41e-09 | 4.99e-09 |
+| `daily_tto` | 2.41e-09 | 4.99e-09 |
+| `close_count` | 0.0 | 0.0 |
+
 本轮优化将同一台机器、同一份数据上的完整回测耗时从约 `64.32s` 降低到了约 `7.68s`；在进一步加入预处理后的 pool cache 并命中热缓存后，完整回测耗时进一步下降到了约 `4.76s`。
 
 | 指标 | 优化前 | 优化后 | 节省时间 | 加速倍数 |
