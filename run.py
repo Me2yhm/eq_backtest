@@ -29,6 +29,7 @@ from portfolio import generate_portfolio
 
 def compute_returns(
     portfolio_returns: pd.Series,
+    cost_turnover: pd.Series,
     turnover: pd.Series,
     bm_ret: pd.Series,
     is_short: bool,
@@ -44,11 +45,11 @@ def compute_returns(
     Returns
     -------
     excess_ret : daily excess return Series
-    turnover   : daily one-way turnover Series
+    turnover   : daily one-way turnover Series for reporting
     """
     bm_aligned = bm_ret.reindex(portfolio_returns.index)
     excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
-    excess -= turnover.mul(cost)
+    excess -= cost_turnover.mul(cost)
 
     if exclude_period:
         lo = pd.to_datetime(exclude_period[0])
@@ -65,6 +66,7 @@ def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
 
 def _build_portfolio_pnl_frame(
     portfolio_returns: pd.Series,
+    cost_turnover: pd.Series,
     turnover: pd.Series,
     bm_ret: pd.Series,
     close_counts: pd.DataFrame,
@@ -74,7 +76,7 @@ def _build_portfolio_pnl_frame(
 ) -> pd.DataFrame:
     daily_benchmark = bm_ret.reindex(portfolio_returns.index).fillna(0.0).rename("daily_benchmark")
     daily_tto = turnover.rename("daily_tto").copy()
-    daily_strategy = portfolio_returns.sub(daily_tto.mul(cost)).rename("daily_strategy")
+    daily_strategy = portfolio_returns.sub(cost_turnover.mul(cost)).rename("daily_strategy")
     daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
     daily_alpha = daily_alpha.rename("daily_alpha")
 
@@ -167,6 +169,7 @@ def run() -> None:
 
         excess, turnover = compute_returns(
             result.portfolio_returns,
+            result.cost_turnover,
             result.turnover,
             bm_ret,
             is_short=cfg.IS_SHORT,
@@ -175,6 +178,7 @@ def run() -> None:
         )
         portfolio_pnl = _build_portfolio_pnl_frame(
             portfolio_returns=result.portfolio_returns,
+            cost_turnover=result.cost_turnover,
             turnover=result.turnover,
             bm_ret=bm_ret,
             close_counts=close_counts,

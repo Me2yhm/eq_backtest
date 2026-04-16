@@ -24,6 +24,7 @@ class PortfolioResult:
     positions: pd.DataFrame
     close_counts: pd.DataFrame
     portfolio_returns: pd.Series
+    cost_turnover: pd.Series
     turnover: pd.Series
     held_counts: pd.Series
 
@@ -105,7 +106,8 @@ def _simulate_portfolio_core(
     held_count = 0
     prev_share_count = 0
     close_counts = np.zeros(n_days, dtype=np.int32)
-    daily_turnover = np.zeros(n_days, dtype=np.float64)
+    daily_turnover_cost = np.zeros(n_days, dtype=np.float64)
+    daily_turnover_report = np.zeros(n_days, dtype=np.float64)
     daily_returns = np.zeros(n_days, dtype=np.float64)
     held_counts = np.zeros(n_days, dtype=np.int32)
 
@@ -245,7 +247,8 @@ def _simulate_portfolio_core(
             prev_total_mv = 0.0
             overnight_pl = 0.0
             intraday_pl = 0.0
-            trading_notional = 0.0
+            trading_notional_cost = 0.0
+            trading_notional_report = 0.0
 
             for i in range(touched_count):
                 symbol_id = touched_symbols[i]
@@ -276,9 +279,12 @@ def _simulate_portfolio_core(
                         intraday_pl += curr_shares * (exec_close - exec_vwap)
 
                 if exec_row_idx != -1:
+                    exec_vwap = vwap30[exec_row_idx]
                     exec_vwap30ori = vwap30ori[exec_row_idx]
+                    if np.isfinite(exec_vwap):
+                        trading_notional_report += abs(curr_shares - prev_shares) * exec_vwap
                     if np.isfinite(exec_vwap30ori):
-                        trading_notional += abs(curr_shares - prev_shares) * exec_vwap30ori
+                        trading_notional_cost += abs(curr_shares - prev_shares) * exec_vwap30ori
 
             if prev_total_mv <= 0.0:
                 for i in range(curr_share_count):
@@ -291,7 +297,8 @@ def _simulate_portfolio_core(
 
             denominator = prev_total_mv if prev_total_mv > 0.0 else 1.0
             daily_returns[day_idx] = (overnight_pl + intraday_pl) / denominator
-            daily_turnover[day_idx] = trading_notional / denominator
+            daily_turnover_cost[day_idx] = trading_notional_cost / denominator
+            daily_turnover_report[day_idx] = trading_notional_report / denominator
 
             for i in range(prev_share_count):
                 symbol_id = prev_share_symbols[i]
@@ -350,7 +357,8 @@ def _simulate_portfolio_core(
         rec_ret[:rec_count],
         rec_tradable[:rec_count],
         close_counts,
-        daily_turnover,
+        daily_turnover_cost,
+        daily_turnover_report,
         daily_returns,
         held_counts,
     )
@@ -482,7 +490,7 @@ def generate_portfolio(
 
     Returns
     -------
-    PortfolioResult with positions, close counts, daily returns, turnover, and held counts.
+    PortfolioResult with positions, close counts, daily returns, cost turnover, report turnover, and held counts.
     """
     thresh_out = port_size + thresh_out_buffer
     sorted_rows, sorted_offsets = _build_day_orders(pool, ascending=is_short)
@@ -496,6 +504,7 @@ def generate_portfolio(
         rec_ret,
         rec_tradable,
         close_counts_arr,
+        cost_turnover_arr,
         turnover_arr,
         port_ret_arr,
         held_counts_arr,
@@ -536,6 +545,7 @@ def generate_portfolio(
     dates = pd.to_datetime(pool.dates)
     close_counts = pd.DataFrame({"n_closed": close_counts_arr}, index=dates)
     portfolio_returns = pd.Series(port_ret_arr, index=dates, name="portfolio_return")
+    cost_turnover = pd.Series(cost_turnover_arr, index=dates, name="cost_turnover")
     turnover = pd.Series(turnover_arr, index=dates, name="turnover")
     held_counts = pd.Series(held_counts_arr, index=dates, name="held_count")
 
@@ -546,6 +556,7 @@ def generate_portfolio(
         positions=positions,
         close_counts=close_counts,
         portfolio_returns=portfolio_returns,
+        cost_turnover=cost_turnover,
         turnover=turnover,
         held_counts=held_counts,
     )
