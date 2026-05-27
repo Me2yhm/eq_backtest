@@ -24,6 +24,7 @@ class PortfolioResult:
     positions: pd.DataFrame
     close_counts: pd.DataFrame
     portfolio_returns: pd.Series
+    cost_turnover: pd.Series
     turnover: pd.Series
     held_counts: pd.Series
 
@@ -36,21 +37,20 @@ def _build_day_orders(pool: BacktestDataset, ascending: bool) -> tuple[np.ndarra
     counts = np.empty(len(pool.dates), dtype=np.int64)
     ordered_days: list[np.ndarray] = []
     pred = pool.pred
-    tradable = pool.tradable
 
     for day_idx in range(len(pool.dates)):
         start = int(pool.day_offsets[day_idx])
         end = int(pool.day_offsets[day_idx + 1])
         day_rows = np.arange(start, end, dtype=np.int32)
-        mask = tradable[start:end] & np.isfinite(pred[start:end])
-        tradable_rows = day_rows[mask]
-        if tradable_rows.size:
-            local_order = np.arange(tradable_rows.size, dtype=np.int32)
-            day_pred = pred[tradable_rows]
+        mask = np.isfinite(pred[start:end])
+        ranked_rows = day_rows[mask]
+        if ranked_rows.size:
+            local_order = np.arange(ranked_rows.size, dtype=np.int32)
+            day_pred = pred[ranked_rows]
             sorter = np.lexsort((local_order, day_pred if ascending else -day_pred))
-            tradable_rows = tradable_rows[sorter]
-        ordered_days.append(tradable_rows)
-        counts[day_idx] = tradable_rows.size
+            ranked_rows = ranked_rows[sorter]
+        ordered_days.append(ranked_rows)
+        counts[day_idx] = ranked_rows.size
 
     offsets = np.empty(len(counts) + 1, dtype=np.int64)
     offsets[0] = 0
@@ -67,8 +67,13 @@ def _simulate_portfolio_core(
     sorted_offsets: np.ndarray,
     row_symbol_ids: np.ndarray,
     ret: np.ndarray,
+    close_ex: np.ndarray,
+    vwap30: np.ndarray,
+    vwap30ori: np.ndarray,
     size_rank: np.ndarray,
     tradable: np.ndarray,
+    can_close: np.ndarray,
+    can_open_base: np.ndarray,
     can_open: np.ndarray,
     n_symbols: int,
     port_size: int,
@@ -76,18 +81,33 @@ def _simulate_portfolio_core(
     size_cut: int,
     close_on_size_drop: bool,
     strict_first_day_top_n: bool,
+    trade_on_next_day: bool,
+    is_short: bool,
 ) -> tuple:
     n_days = len(day_offsets) - 1
+    first_execution_day = 1 if trade_on_next_day else 0
 
     held = np.zeros(n_symbols, dtype=np.bool_)
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     last_row = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
+    signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
+    signal_can_open_pool = np.zeros(n_symbols, dtype=np.bool_)
+    signal_row_by_symbol = np.full(n_symbols, -1, dtype=np.int64)
+    prev_day_row = np.full(n_symbols, -1, dtype=np.int64)
     held_symbols = np.full(port_size, -1, dtype=np.int32)
+    shares_prev = np.zeros(n_symbols, dtype=np.float64)
+    shares_curr = np.zeros(n_symbols, dtype=np.float64)
+    prev_share_symbols = np.full(n_symbols, -1, dtype=np.int32)
+    curr_share_symbols = np.full(port_size, -1, dtype=np.int32)
+    touched = np.zeros(n_symbols, dtype=np.bool_)
+    touched_symbols = np.full(n_symbols, -1, dtype=np.int32)
 
     held_count = 0
+    prev_share_count = 0
     close_counts = np.zeros(n_days, dtype=np.int32)
-    daily_turnover = np.zeros(n_days, dtype=np.float64)
+    daily_turnover_cost = np.zeros(n_days, dtype=np.float64)
+    daily_turnover_report = np.zeros(n_days, dtype=np.float64)
     daily_returns = np.zeros(n_days, dtype=np.float64)
     held_counts = np.zeros(n_days, dtype=np.int32)
 
@@ -99,11 +119,14 @@ def _simulate_portfolio_core(
     rec_ret = np.empty(record_capacity, dtype=np.float64)
     rec_tradable = np.empty(record_capacity, dtype=np.bool_)
     rec_count = 0
+    portfolio_sign = -1.0 if is_short else 1.0
 
     for day_idx in range(n_days):
-        prev_held = held.copy()
         current_row[:] = -1
         rank_by_symbol[:] = 0
+        signal_in_size_pool[:] = False
+        signal_can_open_pool[:] = False
+        signal_row_by_symbol[:] = -1
 
         day_start = day_offsets[day_idx]
         day_end = day_offsets[day_idx + 1]
@@ -111,18 +134,34 @@ def _simulate_portfolio_core(
             symbol_id = row_symbol_ids[row_idx]
             current_row[symbol_id] = row_idx
 
-        rank = 0
-        order_start = sorted_offsets[day_idx]
-        order_end = sorted_offsets[day_idx + 1]
-        for pos in range(order_start, order_end):
-            row_idx = sorted_rows[pos]
-            symbol_id = row_symbol_ids[row_idx]
-            if size_rank[row_idx] < size_cut or held[symbol_id]:
-                rank += 1
-                rank_by_symbol[symbol_id] = rank
+        signal_day_idx = day_idx - 1 if trade_on_next_day else day_idx
+        has_signal = signal_day_idx >= 0
+        order_start = 0
+        order_end = 0
+
+        if has_signal:
+            signal_day_start = day_offsets[signal_day_idx]
+            signal_day_end = day_offsets[signal_day_idx + 1]
+            for row_idx in range(signal_day_start, signal_day_end):
+                symbol_id = row_symbol_ids[row_idx]
+                signal_row_by_symbol[symbol_id] = row_idx
+
+            rank = 0
+            order_start = sorted_offsets[signal_day_idx]
+            order_end = sorted_offsets[signal_day_idx + 1]
+            for pos in range(order_start, order_end):
+                signal_row_idx = sorted_rows[pos]
+                symbol_id = row_symbol_ids[signal_row_idx]
+                if size_rank[signal_row_idx] < size_cut:
+                    signal_in_size_pool[symbol_id] = True
+                    if can_open_base[signal_row_idx]:
+                        signal_can_open_pool[symbol_id] = True
+                if signal_can_open_pool[symbol_id] or held[symbol_id]:
+                    rank += 1
+                    rank_by_symbol[symbol_id] = rank
 
         n_closed = 0
-        if day_idx > 0:
+        if has_signal:
             new_count = 0
             for i in range(held_count):
                 symbol_id = held_symbols[i]
@@ -130,10 +169,10 @@ def _simulate_portfolio_core(
                 should_close = False
                 if row_idx != -1:
                     last_row[symbol_id] = row_idx
-                    if tradable[row_idx]:
+                    if can_close[row_idx]:
                         if rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out:
                             should_close = True
-                        if close_on_size_drop and size_rank[row_idx] >= size_cut:
+                        if close_on_size_drop and not signal_in_size_pool[symbol_id]:
                             should_close = True
 
                 if should_close:
@@ -146,32 +185,143 @@ def _simulate_portfolio_core(
             held_count = new_count
 
         n_opened = 0
-        for pos in range(order_start, order_end):
-            if held_count == port_size:
-                break
+        if has_signal:
+            for pos in range(order_start, order_end):
+                if held_count == port_size:
+                    break
 
-            row_idx = sorted_rows[pos]
-            symbol_id = row_symbol_ids[row_idx]
+                signal_row_idx = sorted_rows[pos]
+                symbol_id = row_symbol_ids[signal_row_idx]
+                exec_row_idx = current_row[symbol_id]
 
-            if day_idx == 0 and strict_first_day_top_n and rank_by_symbol[symbol_id] > port_size:
-                continue
+                if day_idx == first_execution_day and strict_first_day_top_n and rank_by_symbol[symbol_id] > port_size:
+                    continue
 
-            if size_rank[row_idx] < size_cut and can_open[row_idx] and not held[symbol_id]:
-                held[symbol_id] = True
-                held_symbols[held_count] = symbol_id
-                held_count += 1
-                last_row[symbol_id] = row_idx
-                n_opened += 1
+                if (
+                    signal_can_open_pool[symbol_id]
+                    and exec_row_idx != -1
+                    and can_open[exec_row_idx]
+                    and not held[symbol_id]
+                ):
+                    held[symbol_id] = True
+                    held_symbols[held_count] = symbol_id
+                    held_count += 1
+                    last_row[symbol_id] = exec_row_idx
+                    n_opened += 1
 
         close_counts[day_idx] = n_closed
-        changed_count = 0
-        for symbol_id in range(n_symbols):
-            if held[symbol_id] != prev_held[symbol_id]:
-                changed_count += 1
-        daily_turnover[day_idx] = changed_count / port_size
+
+        if has_signal:
+            curr_share_count = 0
+            target_weight = 0.0
+            if held_count > 0:
+                target_weight = portfolio_sign / held_count
+
+            for i in range(held_count):
+                symbol_id = held_symbols[i]
+                signal_row_idx = signal_row_by_symbol[symbol_id]
+                if signal_row_idx == -1:
+                    continue
+
+                signal_close = close_ex[signal_row_idx]
+                if np.isfinite(signal_close) and signal_close != 0.0:
+                    share = target_weight / signal_close
+                    shares_curr[symbol_id] = share
+                    curr_share_symbols[curr_share_count] = symbol_id
+                    curr_share_count += 1
+
+            touched_count = 0
+            for i in range(prev_share_count):
+                symbol_id = prev_share_symbols[i]
+                if not touched[symbol_id]:
+                    touched[symbol_id] = True
+                    touched_symbols[touched_count] = symbol_id
+                    touched_count += 1
+            for i in range(curr_share_count):
+                symbol_id = curr_share_symbols[i]
+                if not touched[symbol_id]:
+                    touched[symbol_id] = True
+                    touched_symbols[touched_count] = symbol_id
+                    touched_count += 1
+
+            prev_total_mv = 0.0
+            overnight_pl = 0.0
+            intraday_pl = 0.0
+            trading_notional_cost = 0.0
+            trading_notional_report = 0.0
+
+            for i in range(touched_count):
+                symbol_id = touched_symbols[i]
+                touched[symbol_id] = False
+
+                prev_shares = shares_prev[symbol_id]
+                curr_shares = shares_curr[symbol_id]
+
+                prev_row_idx = prev_day_row[symbol_id]
+                exec_row_idx = current_row[symbol_id]
+
+                prev_close = np.nan
+                if prev_row_idx != -1:
+                    prev_close = close_ex[prev_row_idx]
+
+                if np.isfinite(prev_close):
+                    prev_total_mv += abs(prev_shares) * prev_close
+
+                if prev_shares != 0.0 and prev_row_idx != -1 and exec_row_idx != -1:
+                    exec_vwap = vwap30[exec_row_idx]
+                    if np.isfinite(exec_vwap) and np.isfinite(prev_close):
+                        overnight_pl += prev_shares * (exec_vwap - prev_close)
+
+                if curr_shares != 0.0 and exec_row_idx != -1:
+                    exec_vwap = vwap30[exec_row_idx]
+                    exec_close = close_ex[exec_row_idx]
+                    if np.isfinite(exec_vwap) and np.isfinite(exec_close):
+                        intraday_pl += curr_shares * (exec_close - exec_vwap)
+
+                if exec_row_idx != -1:
+                    exec_vwap = vwap30[exec_row_idx]
+                    exec_vwap30ori = vwap30ori[exec_row_idx]
+                    if np.isfinite(exec_vwap):
+                        trading_notional_report += abs(curr_shares - prev_shares) * exec_vwap
+                    if np.isfinite(exec_vwap30ori):
+                        trading_notional_cost += abs(curr_shares - prev_shares) * exec_vwap30ori
+
+            if prev_total_mv <= 0.0:
+                for i in range(curr_share_count):
+                    symbol_id = curr_share_symbols[i]
+                    exec_row_idx = current_row[symbol_id]
+                    if exec_row_idx != -1:
+                        exec_close = close_ex[exec_row_idx]
+                        if np.isfinite(exec_close):
+                            prev_total_mv += abs(shares_curr[symbol_id]) * exec_close
+
+            denominator = prev_total_mv if prev_total_mv > 0.0 else 1.0
+            daily_returns[day_idx] = (overnight_pl + intraday_pl) / denominator
+            daily_turnover_cost[day_idx] = trading_notional_cost / denominator
+            daily_turnover_report[day_idx] = trading_notional_report / denominator
+
+            for i in range(prev_share_count):
+                symbol_id = prev_share_symbols[i]
+                if shares_curr[symbol_id] == 0.0:
+                    shares_prev[symbol_id] = 0.0
+
+            next_prev_share_count = 0
+            for i in range(curr_share_count):
+                symbol_id = curr_share_symbols[i]
+                shares_prev[symbol_id] = shares_curr[symbol_id]
+                prev_share_symbols[next_prev_share_count] = symbol_id
+                next_prev_share_count += 1
+                shares_curr[symbol_id] = 0.0
+
+            prev_share_count = next_prev_share_count
+        else:
+            for i in range(prev_share_count):
+                symbol_id = prev_share_symbols[i]
+                shares_prev[symbol_id] = 0.0
+            prev_share_count = 0
+
         held_counts[day_idx] = held_count
 
-        day_ret_sum = 0.0
         for i in range(held_count):
             symbol_id = held_symbols[i]
             row_idx = current_row[symbol_id]
@@ -195,10 +345,9 @@ def _simulate_portfolio_core(
                 else:
                     rec_pred_rank[rec_count] = np.nan
 
-            day_ret_sum += rec_ret[rec_count]
             rec_count += 1
 
-        daily_returns[day_idx] = day_ret_sum / port_size
+        prev_day_row[:] = current_row
 
     return (
         rec_date_idx[:rec_count],
@@ -208,7 +357,8 @@ def _simulate_portfolio_core(
         rec_ret[:rec_count],
         rec_tradable[:rec_count],
         close_counts,
-        daily_turnover,
+        daily_turnover_cost,
+        daily_turnover_report,
         daily_returns,
         held_counts,
     )
@@ -311,6 +461,7 @@ def generate_portfolio(
     thresh_out_buffer: int = 200,
     size_cut: int = 9999,
     close_on_size_drop: bool = True,
+    trade_on_next_day: bool = True,
     strict_first_day_top_n: bool = False,
     is_short: bool = True,
     plot_heatmap: bool = True,
@@ -332,16 +483,19 @@ def generate_portfolio(
     thresh_out_buffer : exit trigger = port_size + thresh_out_buffer
     size_cut          : market-cap rank upper bound for the eligible universe
     close_on_size_drop: also close when a stock falls outside size_cut
+    trade_on_next_day : if True, day T predictions are executed on day T+1
     strict_first_day_top_n: if True, day 0 only opens names ranked within the top port_size window
     is_short          : rank ascending if True (short worst), descending if False (long best)
     plot_heatmap      : save a size-rank distribution heatmap to output_dir
 
     Returns
     -------
-    PortfolioResult with positions, close counts, daily returns, turnover, and held counts.
+    PortfolioResult with positions, close counts, daily returns, cost turnover, report turnover, and held counts.
     """
     thresh_out = port_size + thresh_out_buffer
     sorted_rows, sorted_offsets = _build_day_orders(pool, ascending=is_short)
+    can_open_exec = (pool.can_trade_sell if is_short else pool.can_trade_buy) & pool.can_open_base
+    can_close_exec = pool.can_trade_buy if is_short else pool.can_trade_sell
     (
         rec_date_idx,
         rec_source_row,
@@ -350,6 +504,7 @@ def generate_portfolio(
         rec_ret,
         rec_tradable,
         close_counts_arr,
+        cost_turnover_arr,
         turnover_arr,
         port_ret_arr,
         held_counts_arr,
@@ -359,15 +514,22 @@ def generate_portfolio(
         sorted_offsets=sorted_offsets,
         row_symbol_ids=pool.row_symbol_ids,
         ret=pool.ret,
+        close_ex=pool.close_ex,
+        vwap30=pool.vwap30,
+        vwap30ori=pool.vwap30ori,
         size_rank=pool.size_rank,
         tradable=pool.tradable,
-        can_open=pool.can_open,
+        can_close=can_close_exec,
+        can_open_base=pool.can_open_base,
+        can_open=can_open_exec,
         n_symbols=len(pool.symbols),
         port_size=port_size,
         thresh_out=thresh_out,
         size_cut=size_cut,
         close_on_size_drop=close_on_size_drop,
         strict_first_day_top_n=strict_first_day_top_n,
+        trade_on_next_day=trade_on_next_day,
+        is_short=is_short,
     )
 
     positions = _materialize_positions(
@@ -383,6 +545,7 @@ def generate_portfolio(
     dates = pd.to_datetime(pool.dates)
     close_counts = pd.DataFrame({"n_closed": close_counts_arr}, index=dates)
     portfolio_returns = pd.Series(port_ret_arr, index=dates, name="portfolio_return")
+    cost_turnover = pd.Series(cost_turnover_arr, index=dates, name="cost_turnover")
     turnover = pd.Series(turnover_arr, index=dates, name="turnover")
     held_counts = pd.Series(held_counts_arr, index=dates, name="held_count")
 
@@ -393,6 +556,7 @@ def generate_portfolio(
         positions=positions,
         close_counts=close_counts,
         portfolio_returns=portfolio_returns,
+        cost_turnover=cost_turnover,
         turnover=turnover,
         held_counts=held_counts,
     )

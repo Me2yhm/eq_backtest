@@ -29,6 +29,7 @@ from portfolio import generate_portfolio
 
 def compute_returns(
     portfolio_returns: pd.Series,
+    cost_turnover: pd.Series,
     turnover: pd.Series,
     bm_ret: pd.Series,
     is_short: bool,
@@ -44,11 +45,11 @@ def compute_returns(
     Returns
     -------
     excess_ret : daily excess return Series
-    turnover   : daily one-way turnover Series
+    turnover   : daily one-way turnover Series for reporting
     """
     bm_aligned = bm_ret.reindex(portfolio_returns.index)
     excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
-    excess -= turnover.mul(cost)
+    excess -= cost_turnover.mul(cost)
 
     if exclude_period:
         lo = pd.to_datetime(exclude_period[0])
@@ -61,6 +62,52 @@ def compute_returns(
 def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
     frame = pl.from_pandas(positions.reset_index()).with_columns(pl.col("date").cast(pl.Date))
     frame.write_csv(output_path)
+
+
+def _build_portfolio_pnl_frame(
+    portfolio_returns: pd.Series,
+    cost_turnover: pd.Series,
+    turnover: pd.Series,
+    bm_ret: pd.Series,
+    close_counts: pd.DataFrame,
+    is_short: bool,
+    cost: float,
+    exclude_period: tuple | None,
+) -> pd.DataFrame:
+    daily_benchmark = bm_ret.reindex(portfolio_returns.index).fillna(0.0).rename("daily_benchmark")
+    daily_tto = turnover.rename("daily_tto").copy()
+    daily_strategy = portfolio_returns.sub(cost_turnover.mul(cost)).rename("daily_strategy")
+    daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
+    daily_alpha = daily_alpha.rename("daily_alpha")
+
+    if exclude_period:
+        lo = pd.to_datetime(exclude_period[0])
+        hi = pd.to_datetime(exclude_period[1])
+        mask = (daily_strategy.index >= lo) & (daily_strategy.index < hi)
+        daily_strategy.loc[mask] = 0.0
+        daily_alpha.loc[mask] = 0.0
+        daily_tto.loc[mask] = 0.0
+
+    all_pl = daily_strategy.cumsum().rename("all_pl")
+    alpha_pl = daily_alpha.cumsum().rename("alpha_pl")
+    benchmark = daily_benchmark.cumsum().rename("benchmark")
+    close_count = close_counts["n_closed"].reindex(portfolio_returns.index).fillna(0).astype(int).rename("close_count")
+
+    frame = pd.concat(
+        [
+            all_pl,
+            alpha_pl,
+            benchmark,
+            daily_strategy,
+            daily_benchmark,
+            daily_alpha,
+            daily_tto,
+            close_count,
+        ],
+        axis=1,
+    )
+    frame.index.name = "date"
+    return frame
 
 
 # ── Logging helper ─────────────────────────────────────────────────────────────
@@ -110,6 +157,7 @@ def run() -> None:
             thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
             size_cut=cfg.POOL_SIZE,
             close_on_size_drop=True,
+            trade_on_next_day=cfg.TRADE_ON_NEXT_DAY,
             strict_first_day_top_n=cfg.STRICT_FIRST_DAY_TOP_N,
             is_short=cfg.IS_SHORT,
             output_dir=output_dir,
@@ -121,11 +169,27 @@ def run() -> None:
 
         excess, turnover = compute_returns(
             result.portfolio_returns,
+            result.cost_turnover,
             result.turnover,
             bm_ret,
             is_short=cfg.IS_SHORT,
             cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
+        )
+        portfolio_pnl = _build_portfolio_pnl_frame(
+            portfolio_returns=result.portfolio_returns,
+            cost_turnover=result.cost_turnover,
+            turnover=result.turnover,
+            bm_ret=bm_ret,
+            close_counts=close_counts,
+            is_short=cfg.IS_SHORT,
+            cost=cfg.COST_PER_TURNOVER,
+            exclude_period=cfg.EXCLUDE_PERIOD,
+        )
+        portfolio_pnl.to_csv(
+            f"{output_dir}portfolio_pnl_{port_size}.csv",
+            index_label="date",
+            float_format="%.8f",
         )
 
         m = portfolio_metrics(excess)

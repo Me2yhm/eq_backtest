@@ -33,10 +33,22 @@ MARKET_REQUIRED_COLUMNS = {
     "listed_Satisfied",
     "is_ST",
     "normal_days",
+    "vwap30ori",
+    "close_ex",
+    "vwap30",
 }
 
-POOL_CACHE_VERSION = 1
-CACHED_POOL_REQUIRED_COLUMNS = MARKET_REQUIRED_COLUMNS | {"pred", "tradable", "can_open", "row_idx", "symbol_id"}
+POOL_CACHE_VERSION = 3
+CACHED_POOL_REQUIRED_COLUMNS = MARKET_REQUIRED_COLUMNS | {
+    "pred",
+    "tradable",
+    "can_open",
+    "can_trade_buy",
+    "can_trade_sell",
+    "can_open_base",
+    "row_idx",
+    "symbol_id",
+}
 
 
 @dataclass(slots=True)
@@ -53,6 +65,12 @@ class BacktestDataset:
     size_rank: np.ndarray
     tradable: np.ndarray
     can_open: np.ndarray
+    can_trade_buy: np.ndarray
+    can_trade_sell: np.ndarray
+    can_open_base: np.ndarray
+    close_ex: np.ndarray
+    vwap30: np.ndarray
+    vwap30ori: np.ndarray
     sort_cache: dict[bool, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
 
 
@@ -207,19 +225,23 @@ def load_market_data(
 
     Columns added
     -------------
-    tradable  : has volume AND open price is not at a limit
-    can_open  : tradable + ≥10 consecutive normal days + optionally not ST + in universe
+    tradable      : has volume AND is not at either price limit
+    can_trade_buy : buy-side execution allowed on this day
+    can_trade_sell: sell-side execution allowed on this day
+    can_open      : symmetric open flag retained for diagnostics/backward compatibility
     """
     _validate_market_schema(path)
     start_date = date.fromisoformat(start)
-    tradable_expr = (
-        (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean) & ~pl.col("is_limit_down").cast(pl.Boolean)
-    )
-    can_open_expr = tradable_expr & (pl.col("normal_days") >= 10)
+    can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
+    can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
+    tradable_expr = can_trade_buy_expr & can_trade_sell_expr
+    can_open_base_expr = pl.col("normal_days") >= 10
     if not allow_st_open:
-        can_open_expr &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
+        can_open_base_expr &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
     if universe is not None:
-        can_open_expr &= pl.col("index").is_in(universe)
+        can_open_base_expr &= pl.col("index").is_in(universe)
+
+    can_open_expr = tradable_expr & can_open_base_expr
 
     return (
         pl.read_parquet(path)
@@ -227,6 +249,9 @@ def load_market_data(
         .with_columns(
             tradable=tradable_expr,
             can_open=can_open_expr,
+            can_trade_buy=can_trade_buy_expr,
+            can_trade_sell=can_trade_sell_expr,
+            can_open_base=can_open_base_expr,
         )
         .sort(["date", "symbol"])
     )
@@ -262,6 +287,12 @@ def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
         size_rank=encoded["size_rank"].to_numpy().astype(np.int32, copy=False),
         tradable=encoded["tradable"].to_numpy().astype(np.bool_, copy=False),
         can_open=encoded["can_open"].to_numpy().astype(np.bool_, copy=False),
+        can_trade_buy=encoded["can_trade_buy"].to_numpy().astype(np.bool_, copy=False),
+        can_trade_sell=encoded["can_trade_sell"].to_numpy().astype(np.bool_, copy=False),
+        can_open_base=encoded["can_open_base"].to_numpy().astype(np.bool_, copy=False),
+        close_ex=encoded["close_ex"].to_numpy().astype(np.float64, copy=False),
+        vwap30=encoded["vwap30"].to_numpy().astype(np.float64, copy=False),
+        vwap30ori=encoded["vwap30ori"].to_numpy().astype(np.float64, copy=False),
     )
 
 
