@@ -56,6 +56,5 @@ def allValidCondition(daily,startDate,listedOver=20){
 
 daily = select * from allValidCondition(daily,START) where ret is not null
 
-
 // saveText(daily, "save/daily.csv")
 parquet::saveParquet(daily, "save/daily.pqt")
