@@ -19,3 +19,8 @@ dependencies = [
 
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple"
+
+[tool.uv.workspace]
+members = [
+    "backtest_verify",
+]

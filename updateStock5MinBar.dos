@@ -1,0 +1,52 @@
+def get5MinBar(startDate=2015.01.01,dateBatch = 100){
+    endDate=date(now())
+    targetDates = getMarketCalendar("XSHG",startDate,endDate)
+    existDates = exec distinct(date(datetime)) from loadTable("dfs://bars_5m","stocks_5m") where date(datetime) between startDate and endDate
+    increDates = targetDates[not targetDates in existDates]
+    if (size(increDates) == 0){
+        print("无需要更新的日期")
+        return
+    }
+    if (size(increDates) > dateBatch){
+        increDates = cut(increDates, dateBatch)
+    }else {
+        increDates = cut(increDates, 1)
+    }
+    totalBatch = size(increDates)
+    for (i in 0..(totalBatch-1)){
+        dt = increDates[i]
+        print("Processing batch " + (i+1) + "/" + totalBatch + ", dates: " + first(dt) + " ~ " + last(dt))
+        bar1Min =  select symbol as Symbol,Open as Open,high as High,low as Low,close as Close,(open+high+low+close)\4 as Sap,volume as Volume,total_turnover as Turnover,num_trades as NoT,date(datetime) as Date,time(datetime) as Tradetime from loadTable("dfs://bars_1m","stocks_ex") where date(datetime) in dt
+        // 09:31的数据不参与聚合，直接select
+        bar_0931 = select Symbol,concatDateTime(Date,Tradetime) as Datetime,Open,High,Low,Close,Sap,Volume,Turnover,NoT from bar1Min where Tradetime = 09:31:00.000
+        // 09:32-11:26的数据，聚合为5分钟频
+        bar_0932_1126 = select * from bar1Min where Tradetime between 09:32:00.000 and 11:26:00.000
+        update bar_0932_1126 set Tradetime = temporalAdd(Tradetime,-1m)
+        bar_0932_1126 = select firstNot(Open) as Open,max(High) as High,min(Low) as Low,last(Close) as Close, avg(Sap) as Sap,sum(Volume) as Volume,sum(Turnover) as Turnover,sum(NoT) as NoT from bar_0932_1126 group by Symbol,Date,interval(X=Tradetime,duration=5m,fill="none",closed="right",label="right") as Tradetime
+        update bar_0932_1126 set Tradetime = temporalAdd(Tradetime,1m)
+        // 11:27-11:30的数据抛弃不要
+        // 13:01的数据单独作为一个bar
+        // 13:01 的数据不参与聚合，直接 select（与 09:31 的处理一致）
+        bar_1301 = select Symbol,concatDateTime(Date,Tradetime) as Datetime,Open,High,Low,Close,Sap,Volume,Turnover,NoT from bar1Min where Tradetime = 13:01:00.000
+        // 下午同理，选择13:02到14:56的数据
+        bar_1302_1456 = select * from bar1Min where Tradetime between 13:02:00.000 and 14:56:00.000 
+        update bar_1302_1456 set Tradetime = temporalAdd(Tradetime,-1m)
+        bar_1302_1456 = select firstNot(Open) as Open,max(High) as High,min(Low) as Low,last(Close) as Close, avg(Sap) as Sap,sum(Volume) as Volume,sum(Turnover) as Turnover,sum(NoT) as NoT from bar_1302_1456 group by Symbol,Date,interval(X=Tradetime,duration=5m,fill="none",closed="right",label="right") as Tradetime
+        update bar_1302_1456 set Tradetime = temporalAdd(Tradetime,1m)
+        // 14:57-15:00的数据放弃
+        // join，入库
+        result = unionAll((bar_0932_1126,bar_1302_1456))
+        result = select Symbol,concatDateTime(Date,Tradetime) as Datetime,Open,High,Low,Close,Sap,Volume,Turnover,NoT from result
+        result = unionAll((bar_0931,bar_1301,result))
+        result = select * from result order by Datetime,Symbol
+        // 入库
+        loadTable("dfs://bars_5m","stocks_5m").append!(result)
+        print("Batch " + (i+1) + "/" + totalBatch + " done, " + size(result) + " rows generated.")
+    }
+}
+jobID="UpdateStock5MBar"
+JobDes="自动增量更新5分钟股票K线"
+submitJob(jobID,JobDes,get5MinBar)
+
+
+
