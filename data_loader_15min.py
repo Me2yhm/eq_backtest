@@ -1,0 +1,255 @@
+"""
+15-minute data loading utilities.
+
+Public API
+----------
+build_pool_15min(...)  ->  (BacktestDataset15Min, benchmark Series)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import polars as pl
+from loguru import logger
+
+from data_loader import load_benchmark
+
+FLAG_COLUMNS = [
+    "date",
+    "symbol",
+    "turnover",
+    "log_size",
+    "size_rank",
+    "industry",
+    "index",
+    "is_limit_up",
+    "is_limit_down",
+    "listed_Satisfied",
+    "is_ST",
+    "normal_days",
+    "tradable",
+    "can_open_base",
+    "can_trade_buy",
+    "can_trade_sell",
+    "can_open",
+]
+
+
+@dataclass(slots=True)
+class BacktestDataset15Min:
+    """Compact, array-backed 15-minute market and prediction data."""
+
+    pool_frame: pl.DataFrame
+    bars: np.ndarray
+    symbols: np.ndarray
+    bar_offsets: np.ndarray
+    row_symbol_ids: np.ndarray
+    vwap_ret: np.ndarray
+    pred: np.ndarray
+    size_rank: np.ndarray
+    tradable: np.ndarray
+    can_open: np.ndarray
+    can_open_base: np.ndarray
+    can_trade_buy: np.ndarray
+    can_trade_sell: np.ndarray
+    sort_cache: dict[bool, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
+
+
+def _normalize_symbol_column(frame: pl.DataFrame) -> pl.DataFrame:
+    if "symbol" in frame.columns:
+        return frame
+    if "stock_code" in frame.columns:
+        return frame.rename({"stock_code": "symbol"})
+    raise ValueError("Input frame is missing symbol column ('symbol' or 'stock_code')")
+
+
+def _prediction_files(preds_dir: Path, horizons: list[str]) -> list[Path]:
+    parquet_files = sorted(preds_dir.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet prediction files found in '{preds_dir}'")
+
+    matched = [path for path in parquet_files if any(tag in path.stem for tag in horizons)]
+    if matched:
+        return matched
+
+    logger.warning("15m predictions: no file matched horizons {}, fallback to all parquet files", horizons)
+    return parquet_files
+
+
+def load_15min_market(path: Path, start: str) -> pl.DataFrame:
+    """Load 15-minute returns data and derive date from datetime."""
+    frame = pl.read_parquet(path)
+    frame = _normalize_symbol_column(frame)
+
+    if "datetime" not in frame.columns or "vwap_ret" not in frame.columns:
+        raise ValueError("15m market parquet must contain columns: symbol, datetime, vwap_ret")
+
+    if frame["datetime"].dtype == pl.String:
+        frame = frame.with_columns(pl.col("datetime").str.strptime(pl.Datetime, strict=False))
+    else:
+        frame = frame.with_columns(pl.col("datetime").cast(pl.Datetime))
+
+    start_date = date.fromisoformat(start)
+    return (
+        frame.with_columns(pl.col("datetime").dt.date().alias("date"))
+        .filter(pl.col("date") >= pl.lit(start_date))
+        .select(["datetime", "date", "symbol", "vwap_ret"])
+        .sort(["datetime", "symbol"])
+    )
+
+
+def _normalize_prediction_frame(frame: pl.DataFrame) -> pl.DataFrame:
+    columns = set(frame.columns)
+
+    if {"trade_date", "stock_code", "prediction"}.issubset(columns):
+        out = frame.select(["trade_date", "stock_code", "prediction"]).rename(
+            {"trade_date": "datetime", "stock_code": "symbol", "prediction": "pred"}
+        )
+        return out
+
+    if {"datetime", "symbol", "pred"}.issubset(columns):
+        return frame.select(["datetime", "symbol", "pred"])
+
+    if "__index_level_0__" in columns:
+        wide = frame
+        idx = "__index_level_0__"
+        if wide[idx].dtype == pl.String:
+            wide = wide.with_columns(pl.col(idx).str.strptime(pl.Datetime, strict=False))
+        else:
+            wide = wide.with_columns(pl.col(idx).cast(pl.Datetime))
+
+        long = wide.unpivot(index=idx, variable_name="symbol", value_name="pred").rename({idx: "datetime"})
+        return long.select(["datetime", "symbol", "pred"])
+
+    raise ValueError(
+        "Unsupported prediction parquet schema. Expected either "
+        "(trade_date, stock_code, prediction), (datetime, symbol, pred), or wide format with '__index_level_0__'."
+    )
+
+
+def load_15min_predictions(preds_dir: Path, horizons: list[str], start: str) -> pl.DataFrame:
+    """Load 15-minute predictions and average duplicated (datetime, symbol) rows across files."""
+    files = _prediction_files(preds_dir, horizons)
+    start_date = date.fromisoformat(start)
+
+    stacked: list[pl.DataFrame] = []
+    for file_path in files:
+        frame = _normalize_prediction_frame(pl.read_parquet(file_path))
+        if frame["datetime"].dtype == pl.String:
+            frame = frame.with_columns(pl.col("datetime").str.strptime(pl.Datetime, strict=False))
+        else:
+            frame = frame.with_columns(pl.col("datetime").cast(pl.Datetime))
+
+        frame = frame.with_columns(pl.col("datetime").dt.date().alias("date")).filter(pl.col("date") >= pl.lit(start_date))
+        stacked.append(frame.select(["datetime", "symbol", "pred"]))
+
+    logger.info("15m predictions: {} file(s) loaded – {}", len(files), [f.name for f in files])
+
+    return (
+        pl.concat(stacked, how="vertical")
+        .group_by(["datetime", "symbol"], maintain_order=True)
+        .agg(pl.col("pred").mean().alias("pred"))
+        .sort(["datetime", "symbol"])
+    )
+
+
+def load_daily_flags(path: Path, start: str, universe: list[str] | None, allow_st_open: bool) -> pl.DataFrame:
+    """Load daily data and keep only trading constraints + diagnostic columns."""
+    start_date = date.fromisoformat(start)
+
+    can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
+    can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
+    tradable_expr = can_trade_buy_expr & can_trade_sell_expr
+
+    can_open_base_expr = pl.col("normal_days") >= 10
+    if not allow_st_open:
+        can_open_base_expr &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
+    if universe is not None:
+        can_open_base_expr &= pl.col("index").is_in(universe)
+
+    can_open_expr = tradable_expr & can_open_base_expr
+
+    frame = (
+        pl.read_parquet(path)
+        .filter(pl.col("date") >= pl.lit(start_date))
+        .with_columns(
+            tradable=tradable_expr,
+            can_open_base=can_open_base_expr,
+            can_trade_buy=can_trade_buy_expr,
+            can_trade_sell=can_trade_sell_expr,
+            can_open=can_open_expr,
+        )
+        .select(FLAG_COLUMNS)
+        .sort(["date", "symbol"])
+    )
+
+    return frame
+
+
+def _dataset_from_frame(pool: pl.DataFrame) -> BacktestDataset15Min:
+    symbol_values = pool["symbol"].unique().sort().to_list()
+    symbol_map = pl.DataFrame({"symbol": symbol_values}).with_row_index("symbol_id")
+    encoded = pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx")
+
+    bar_counts = encoded.group_by("datetime", maintain_order=True).len().sort("datetime")
+    bars = bar_counts["datetime"].to_numpy()
+    counts = bar_counts["len"].to_numpy().astype(np.int64, copy=False)
+
+    bar_offsets = np.empty(len(counts) + 1, dtype=np.int64)
+    bar_offsets[0] = 0
+    bar_offsets[1:] = np.cumsum(counts)
+
+    return BacktestDataset15Min(
+        pool_frame=encoded,
+        bars=bars,
+        symbols=np.asarray(symbol_values, dtype=object),
+        bar_offsets=bar_offsets,
+        row_symbol_ids=encoded["symbol_id"].to_numpy().astype(np.int32, copy=False),
+        vwap_ret=encoded["vwap_ret"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        pred=encoded["pred"].fill_null(float("nan")).to_numpy().astype(np.float64, copy=False),
+        size_rank=encoded["size_rank"].fill_null(999999).to_numpy().astype(np.int32, copy=False),
+        tradable=encoded["tradable"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_open=encoded["can_open"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_open_base=encoded["can_open_base"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_trade_buy=encoded["can_trade_buy"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_trade_sell=encoded["can_trade_sell"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+    )
+
+
+def build_pool_15min(
+    data_15min_path: Path,
+    preds_15min_dir: Path,
+    daily_data_path: Path,
+    bm_path: Path,
+    horizons_15min: list[str],
+    start: str,
+    universe: list[str] | None,
+    allow_st_open: bool,
+) -> tuple[BacktestDataset15Min, pd.Series]:
+    """
+    Build 15-minute backtest dataset with daily constraint flags broadcast by (date, symbol).
+
+    Returns
+    -------
+    pool_15m : BacktestDataset15Min
+    bm_ret   : daily benchmark return Series
+    """
+    bm_ret = load_benchmark(bm_path)
+
+    market_15m = load_15min_market(data_15min_path, start)
+    daily_flags = load_daily_flags(daily_data_path, start, universe, allow_st_open)
+    preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start)
+
+    pool = (
+        market_15m.join(daily_flags, on=["date", "symbol"], how="left")
+        .join(preds_15m, on=["datetime", "symbol"], how="left")
+        .sort(["datetime", "symbol"])
+    )
+
+    dataset = _dataset_from_frame(pool)
+    return dataset, bm_ret

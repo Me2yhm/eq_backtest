@@ -1,6 +1,7 @@
 undef all
-
 go
+
+
 // START = 2025.01.01
 START = 2026.05.01
 
@@ -35,6 +36,7 @@ result = select symbol, datetime, vwap15 / prev(vwap15) - 1 as vwap_ret from res
 
 
 // saveText(daily, "save/daily.csv")
-parquet::saveParquet(result, "save/vwap_ret_15min.pqt")
+// parquet::saveParquet(result, "save/vwap_ret_15min.pqt")
+parquet::saveParquet(result, "/home/trq/update_daily/vwap_ret_15min.pqt")
 
-print(result)
+// print(result)

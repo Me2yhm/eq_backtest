@@ -16,6 +16,7 @@ from loguru import logger
 
 import config as cfg
 from data_loader import build_pool
+from data_loader_15min import build_pool_15min
 from metrics import holding_period_stats, portfolio_metrics
 from plotting import (
     plot_holding_periods,
@@ -23,6 +24,7 @@ from plotting import (
     plot_portfolio_results,
 )
 from portfolio import generate_portfolio
+from portfolio_15min import generate_portfolio_15min
 
 # ── Return computation ─────────────────────────────────────────────────────────
 
@@ -59,6 +61,32 @@ def compute_returns(
     return excess, turnover
 
 
+def daily_returns_from_15min(returns_15min: pd.Series) -> pd.Series:
+    """Aggregate 15-minute returns to daily compounded returns."""
+    if returns_15min.empty:
+        return returns_15min
+    grouped = returns_15min.groupby(returns_15min.index.normalize())
+    return grouped.apply(lambda x: (1.0 + x).prod() - 1.0).rename(returns_15min.name)
+
+
+def daily_sum_from_15min(series_15min: pd.Series, name: str) -> pd.Series:
+    """Aggregate additive 15-minute series (e.g. turnover, close counts) to daily sums."""
+    if series_15min.empty:
+        return series_15min.rename(name)
+    return series_15min.groupby(series_15min.index.normalize()).sum().rename(name)
+
+
+def _align_benchmark_to_index(bm_ret: pd.Series, index: pd.Index) -> pd.Series:
+    """Align daily benchmark returns to target index (daily or intraday datetime index)."""
+    if isinstance(index, pd.DatetimeIndex):
+        bm_daily = bm_ret.copy()
+        bm_daily.index = pd.to_datetime(bm_daily.index).normalize()
+        if (index != index.normalize()).any():
+            aligned_values = bm_daily.reindex(index.normalize()).to_numpy()
+            return pd.Series(aligned_values, index=index, name=bm_ret.name)
+    return bm_ret.reindex(index)
+
+
 def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
     frame = pl.from_pandas(positions.reset_index()).with_columns(pl.col("date").cast(pl.Date))
     frame.write_csv(output_path)
@@ -74,7 +102,7 @@ def _build_portfolio_pnl_frame(
     cost: float,
     exclude_period: tuple | None,
 ) -> pd.DataFrame:
-    daily_benchmark = bm_ret.reindex(portfolio_returns.index).fillna(0.0).rename("daily_benchmark")
+    daily_benchmark = _align_benchmark_to_index(bm_ret, portfolio_returns.index).fillna(0.0).rename("daily_benchmark")
     daily_tto = turnover.rename("daily_tto").copy()
     daily_strategy = portfolio_returns.sub(cost_turnover.mul(cost)).rename("daily_strategy")
     daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
@@ -129,17 +157,29 @@ def run() -> None:
     output_dir = str(cfg.OUTPUT_DIR) + os.sep
 
     # ── Load data ─────────────────────────────────────────────────────────────
-    pool, bm_ret = build_pool(
-        data_path=cfg.DATA_PATH,
-        preds_dir=cfg.PREDS_DIR,
-        bm_path=cfg.BM_PATH,
-        horizons=cfg.HORIZONS,
-        start=cfg.START,
-        universe=cfg.UNIVERSE,
-        allow_st_open=cfg.ALLOW_ST_OPEN,
-        use_cache=cfg.USE_POOL_CACHE,
-        cache_dir=cfg.POOL_CACHE_DIR,
-    )
+    if cfg.USE_15MIN:
+        pool, bm_ret = build_pool_15min(
+            data_15min_path=cfg.DATA_15MIN_PATH,
+            preds_15min_dir=cfg.PREDS_15MIN_DIR,
+            daily_data_path=cfg.DATA_PATH,
+            bm_path=cfg.BM_PATH,
+            horizons_15min=cfg.HORIZONS_15MIN,
+            start=cfg.START,
+            universe=cfg.UNIVERSE,
+            allow_st_open=cfg.ALLOW_ST_OPEN,
+        )
+    else:
+        pool, bm_ret = build_pool(
+            data_path=cfg.DATA_PATH,
+            preds_dir=cfg.PREDS_DIR,
+            bm_path=cfg.BM_PATH,
+            horizons=cfg.HORIZONS,
+            start=cfg.START,
+            universe=cfg.UNIVERSE,
+            allow_st_open=cfg.ALLOW_ST_OPEN,
+            use_cache=cfg.USE_POOL_CACHE,
+            cache_dir=cfg.POOL_CACHE_DIR,
+        )
 
     # ── Run for each portfolio size ───────────────────────────────────────────
     all_metrics = {}
@@ -151,37 +191,63 @@ def run() -> None:
     for port_size in cfg.PORT_SIZES:
         logger.info("── Portfolio size: {} ──", port_size)
 
-        result = generate_portfolio(
-            pool=pool,
-            port_size=port_size,
-            thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
-            size_cut=cfg.POOL_SIZE,
-            close_on_size_drop=True,
-            trade_on_next_day=cfg.TRADE_ON_NEXT_DAY,
-            strict_first_day_top_n=cfg.STRICT_FIRST_DAY_TOP_N,
-            is_short=cfg.IS_SHORT,
-            output_dir=output_dir,
-        )
+        if cfg.USE_15MIN:
+            result = generate_portfolio_15min(
+                pool=pool,
+                port_size=port_size,
+                thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
+                size_cut=cfg.POOL_SIZE,
+                close_on_size_drop=True,
+                trade_on_next_bar=cfg.TRADE_ON_NEXT_BAR,
+                strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
+                is_short=cfg.IS_SHORT,
+                output_dir=output_dir,
+            )
+        else:
+            result = generate_portfolio(
+                pool=pool,
+                port_size=port_size,
+                thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
+                size_cut=cfg.POOL_SIZE,
+                close_on_size_drop=True,
+                trade_on_next_day=cfg.TRADE_ON_NEXT_DAY,
+                strict_first_day_top_n=cfg.STRICT_FIRST_DAY_TOP_N,
+                is_short=cfg.IS_SHORT,
+                output_dir=output_dir,
+            )
 
         positions = result.positions
         close_counts = result.close_counts
         _write_positions_csv(positions, f"{output_dir}positions_{port_size}.csv")
 
+        if cfg.USE_15MIN:
+            portfolio_returns_eval = daily_returns_from_15min(result.portfolio_returns)
+            cost_turnover_eval = daily_sum_from_15min(result.cost_turnover, "cost_turnover")
+            turnover_eval = daily_sum_from_15min(result.turnover, "turnover")
+            close_counts_eval = pd.DataFrame(
+                {"n_closed": daily_sum_from_15min(close_counts["n_closed"], "n_closed").astype(int)}
+            )
+        else:
+            portfolio_returns_eval = result.portfolio_returns
+            cost_turnover_eval = result.cost_turnover
+            turnover_eval = result.turnover
+            close_counts_eval = close_counts
+
         excess, turnover = compute_returns(
-            result.portfolio_returns,
-            result.cost_turnover,
-            result.turnover,
+            portfolio_returns_eval,
+            cost_turnover_eval,
+            turnover_eval,
             bm_ret,
             is_short=cfg.IS_SHORT,
             cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
         )
         portfolio_pnl = _build_portfolio_pnl_frame(
-            portfolio_returns=result.portfolio_returns,
-            cost_turnover=result.cost_turnover,
-            turnover=result.turnover,
+            portfolio_returns=portfolio_returns_eval,
+            cost_turnover=cost_turnover_eval,
+            turnover=turnover_eval,
             bm_ret=bm_ret,
-            close_counts=close_counts,
+            close_counts=close_counts_eval,
             is_short=cfg.IS_SHORT,
             cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
@@ -199,9 +265,9 @@ def run() -> None:
         all_cumrets[port_size] = excess.cumsum().rename(f"Port_{port_size}")
         all_port_sizes[port_size] = result.held_counts.rename(f"Port_{port_size}")
 
-        if not close_counts.empty:
-            close_counts.columns = [f"Port_{port_size}"]
-            all_closes[port_size] = close_counts
+        if not close_counts_eval.empty:
+            close_counts_eval.columns = [f"Port_{port_size}"]
+            all_closes[port_size] = close_counts_eval
 
         # Holding-period analysis
         hp = holding_period_stats(positions)
