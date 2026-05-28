@@ -7,7 +7,9 @@ from pathlib import Path
 
 # ── Time range ────────────────────────────────────────────────────────────────
 START = "2019-01-02"
-END = None  # e.g. "2026-01-01"; None means no cutoff
+# END = None  # e.g. "2026-01-01"; None means no cutoff
+END = "2026-01-01"
+
 
 # ── Data paths ────────────────────────────────────────────────────────────────
 # DATA_PATH = Path("data/daily.pqt")

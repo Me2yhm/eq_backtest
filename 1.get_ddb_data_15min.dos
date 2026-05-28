@@ -3,7 +3,7 @@ go
 
 
 // START = 2025.01.01
-START = 2025.12.01
+START = 2025.01.01
 
 
 bar1Min = select symbol, datetime, open, high, low, close, total_turnover, volume, date(datetime) as Date,time(datetime) as Tradetime from loadTable("dfs://bars_1m", "stocks_ex")
