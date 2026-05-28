@@ -51,3 +51,13 @@ EXCLUDE_PERIOD = ("2024-01-01", "2024-03-31")
 
 # ── Output directory ──────────────────────────────────────────────────────────
 OUTPUT_DIR = Path(f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}")
+
+# ── 15-minute backtest mode ───────────────────────────────────────────────────
+USE_15MIN = True
+DATA_15MIN_PATH = Path("data_15min/vwap_ret_15min.pqt")
+PREDS_15MIN_DIR = Path("data_15min")
+HORIZONS_15MIN = ["3b", "5b", "10b"]
+
+# 15-minute execution timing
+TRADE_ON_NEXT_BAR = True
+STRICT_FIRST_BAR_TOP_N = False
