@@ -165,6 +165,7 @@ def run() -> None:
             bm_path=cfg.BM_PATH,
             horizons_15min=cfg.HORIZONS_15MIN,
             start=cfg.START,
+            end=cfg.END,
             universe=cfg.UNIVERSE,
             allow_st_open=cfg.ALLOW_ST_OPEN,
         )
@@ -175,6 +176,7 @@ def run() -> None:
             bm_path=cfg.BM_PATH,
             horizons=cfg.HORIZONS,
             start=cfg.START,
+            end=cfg.END,
             universe=cfg.UNIVERSE,
             allow_st_open=cfg.ALLOW_ST_OPEN,
             use_cache=cfg.USE_POOL_CACHE,

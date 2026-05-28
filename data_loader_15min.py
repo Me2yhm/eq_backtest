@@ -81,7 +81,7 @@ def _prediction_files(preds_dir: Path, horizons: list[str]) -> list[Path]:
     return parquet_files
 
 
-def load_15min_market(path: Path, start: str) -> pl.DataFrame:
+def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.DataFrame:
     """Load 15-minute returns data and derive date from datetime."""
     frame = pl.read_parquet(path)
     frame = _normalize_symbol_column(frame)
@@ -95,12 +95,13 @@ def load_15min_market(path: Path, start: str) -> pl.DataFrame:
         frame = frame.with_columns(pl.col("datetime").cast(pl.Datetime))
 
     start_date = date.fromisoformat(start)
-    return (
-        frame.with_columns(pl.col("datetime").dt.date().alias("date"))
-        .filter(pl.col("date") >= pl.lit(start_date))
-        .select(["datetime", "date", "symbol", "vwap_ret"])
-        .sort(["datetime", "symbol"])
-    )
+    end_date = date.fromisoformat(end) if end else None
+
+    out = frame.with_columns(pl.col("datetime").dt.date().alias("date")).filter(pl.col("date") >= pl.lit(start_date))
+    if end_date is not None:
+        out = out.filter(pl.col("date") <= pl.lit(end_date))
+
+    return out.select(["datetime", "date", "symbol", "vwap_ret"]).sort(["datetime", "symbol"])
 
 
 def _normalize_prediction_frame(frame: pl.DataFrame) -> pl.DataFrame:
@@ -132,10 +133,11 @@ def _normalize_prediction_frame(frame: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def load_15min_predictions(preds_dir: Path, horizons: list[str], start: str) -> pl.DataFrame:
+def load_15min_predictions(preds_dir: Path, horizons: list[str], start: str, end: str | None = None) -> pl.DataFrame:
     """Load 15-minute predictions and average duplicated (datetime, symbol) rows across files."""
     files = _prediction_files(preds_dir, horizons)
     start_date = date.fromisoformat(start)
+    end_date = date.fromisoformat(end) if end else None
 
     stacked: list[pl.DataFrame] = []
     for file_path in files:
@@ -146,6 +148,8 @@ def load_15min_predictions(preds_dir: Path, horizons: list[str], start: str) -> 
             frame = frame.with_columns(pl.col("datetime").cast(pl.Datetime))
 
         frame = frame.with_columns(pl.col("datetime").dt.date().alias("date")).filter(pl.col("date") >= pl.lit(start_date))
+        if end_date is not None:
+            frame = frame.filter(pl.col("date") <= pl.lit(end_date))
         stacked.append(frame.select(["datetime", "symbol", "pred"]))
 
     logger.info("15m predictions: {} file(s) loaded – {}", len(files), [f.name for f in files])
@@ -158,9 +162,16 @@ def load_15min_predictions(preds_dir: Path, horizons: list[str], start: str) -> 
     )
 
 
-def load_daily_flags(path: Path, start: str, universe: list[str] | None, allow_st_open: bool) -> pl.DataFrame:
+def load_daily_flags(
+    path: Path,
+    start: str,
+    end: str | None,
+    universe: list[str] | None,
+    allow_st_open: bool,
+) -> pl.DataFrame:
     """Load daily data and keep only trading constraints + diagnostic columns."""
     start_date = date.fromisoformat(start)
+    end_date = date.fromisoformat(end) if end else None
 
     can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
     can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
@@ -174,19 +185,17 @@ def load_daily_flags(path: Path, start: str, universe: list[str] | None, allow_s
 
     can_open_expr = tradable_expr & can_open_base_expr
 
-    frame = (
-        pl.read_parquet(path)
-        .filter(pl.col("date") >= pl.lit(start_date))
-        .with_columns(
-            tradable=tradable_expr,
-            can_open_base=can_open_base_expr,
-            can_trade_buy=can_trade_buy_expr,
-            can_trade_sell=can_trade_sell_expr,
-            can_open=can_open_expr,
-        )
-        .select(FLAG_COLUMNS)
-        .sort(["date", "symbol"])
-    )
+    frame = pl.read_parquet(path).filter(pl.col("date") >= pl.lit(start_date))
+    if end_date is not None:
+        frame = frame.filter(pl.col("date") <= pl.lit(end_date))
+
+    frame = frame.with_columns(
+        tradable=tradable_expr,
+        can_open_base=can_open_base_expr,
+        can_trade_buy=can_trade_buy_expr,
+        can_trade_sell=can_trade_sell_expr,
+        can_open=can_open_expr,
+    ).select(FLAG_COLUMNS).sort(["date", "symbol"])
 
     return frame
 
@@ -228,6 +237,7 @@ def build_pool_15min(
     bm_path: Path,
     horizons_15min: list[str],
     start: str,
+    end: str | None,
     universe: list[str] | None,
     allow_st_open: bool,
 ) -> tuple[BacktestDataset15Min, pd.Series]:
@@ -241,9 +251,9 @@ def build_pool_15min(
     """
     bm_ret = load_benchmark(bm_path)
 
-    market_15m = load_15min_market(data_15min_path, start)
-    daily_flags = load_daily_flags(daily_data_path, start, universe, allow_st_open)
-    preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start)
+    market_15m = load_15min_market(data_15min_path, start, end=end)
+    daily_flags = load_daily_flags(daily_data_path, start, end, universe, allow_st_open)
+    preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start, end=end)
 
     pool = (
         market_15m.join(daily_flags, on=["date", "symbol"], how="left")

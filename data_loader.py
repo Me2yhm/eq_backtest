@@ -120,16 +120,16 @@ class PredictionAlignmentError(ValueError):
     pass
 
 
-def _load_predictions_long_form(files: list[Path], start: str) -> pl.DataFrame:
+def _load_predictions_long_form(files: list[Path], start: str, end: str | None = None) -> pl.DataFrame:
     start_date = date.fromisoformat(start)
+    end_date = date.fromisoformat(end) if end else None
     stacked: list[pl.DataFrame] = []
     for file_path in files:
         wide, index_name = _normalize_prediction_dates(pl.read_parquet(file_path))
-        long = (
-            wide.filter(pl.col(index_name) >= pl.lit(start_date))
-            .unpivot(index=index_name, variable_name="symbol", value_name="pred")
-            .rename({index_name: "date"})
-        )
+        filtered = wide.filter(pl.col(index_name) >= pl.lit(start_date))
+        if end_date is not None:
+            filtered = filtered.filter(pl.col(index_name) <= pl.lit(end_date))
+        long = filtered.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({index_name: "date"})
         stacked.append(long)
 
     return (
@@ -140,11 +140,14 @@ def _load_predictions_long_form(files: list[Path], start: str) -> pl.DataFrame:
     )
 
 
-def _load_predictions_wide_mean(files: list[Path], start: str) -> pl.DataFrame:
+def _load_predictions_wide_mean(files: list[Path], start: str, end: str | None = None) -> pl.DataFrame:
     start_date = date.fromisoformat(start)
+    end_date = date.fromisoformat(end) if end else None
 
     first, index_name = _normalize_prediction_dates(pl.read_parquet(files[0]))
     first = first.filter(pl.col(index_name) >= pl.lit(start_date))
+    if end_date is not None:
+        first = first.filter(pl.col(index_name) <= pl.lit(end_date))
     value_columns = [column for column in first.columns if column != index_name]
     base_dates = first[index_name].to_numpy()
     base_values = first.select(value_columns).to_numpy()
@@ -154,6 +157,8 @@ def _load_predictions_wide_mean(files: list[Path], start: str) -> pl.DataFrame:
     for file_path in files[1:]:
         frame, current_index_name = _normalize_prediction_dates(pl.read_parquet(file_path))
         frame = frame.filter(pl.col(current_index_name) >= pl.lit(start_date))
+        if end_date is not None:
+            frame = frame.filter(pl.col(current_index_name) <= pl.lit(end_date))
 
         if frame.columns != first.columns:
             raise PredictionAlignmentError("Prediction parquet schemas differ across horizons")
@@ -179,7 +184,7 @@ def _load_predictions_wide_mean(files: list[Path], start: str) -> pl.DataFrame:
     return averaged.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({index_name: "date"})
 
 
-def load_predictions(preds_dir: Path, horizons: list, start: str) -> pl.DataFrame:
+def load_predictions(preds_dir: Path, horizons: list, start: str, end: str | None = None) -> pl.DataFrame:
     """
     Load parquet prediction files matching the given horizon suffixes and average them.
 
@@ -190,9 +195,9 @@ def load_predictions(preds_dir: Path, horizons: list, start: str) -> pl.DataFram
     logger.info("Predictions: {} file(s) loaded – {}", len(files), [f.name for f in files])
 
     try:
-        return _load_predictions_wide_mean(files, start)
+        return _load_predictions_wide_mean(files, start, end=end)
     except PredictionAlignmentError:
-        return _load_predictions_long_form(files, start)
+        return _load_predictions_long_form(files, start, end=end)
 
 
 def _validate_market_schema(path: Path) -> None:
@@ -217,6 +222,7 @@ def _validate_market_schema(path: Path) -> None:
 def load_market_data(
     path: Path,
     start: str,
+    end: str | None,
     universe: list | None,
     allow_st_open: bool,
 ) -> pl.DataFrame:
@@ -232,6 +238,7 @@ def load_market_data(
     """
     _validate_market_schema(path)
     start_date = date.fromisoformat(start)
+    end_date = date.fromisoformat(end) if end else None
     can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
     can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
     tradable_expr = can_trade_buy_expr & can_trade_sell_expr
@@ -243,18 +250,17 @@ def load_market_data(
 
     can_open_expr = tradable_expr & can_open_base_expr
 
-    return (
-        pl.read_parquet(path)
-        .filter(pl.col("date") >= pl.lit(start_date))
-        .with_columns(
-            tradable=tradable_expr,
-            can_open=can_open_expr,
-            can_trade_buy=can_trade_buy_expr,
-            can_trade_sell=can_trade_sell_expr,
-            can_open_base=can_open_base_expr,
-        )
-        .sort(["date", "symbol"])
-    )
+    frame = pl.read_parquet(path).filter(pl.col("date") >= pl.lit(start_date))
+    if end_date is not None:
+        frame = frame.filter(pl.col("date") <= pl.lit(end_date))
+
+    return frame.with_columns(
+        tradable=tradable_expr,
+        can_open=can_open_expr,
+        can_trade_buy=can_trade_buy_expr,
+        can_trade_sell=can_trade_sell_expr,
+        can_open_base=can_open_base_expr,
+    ).sort(["date", "symbol"])
 
 
 # ── Combined entry point ───────────────────────────────────────────────────────
@@ -350,6 +356,7 @@ def build_pool(
     bm_path: Path,
     horizons: list,
     start: str,
+    end: str | None,
     universe: list | None,
     allow_st_open: bool,
     use_cache: bool = True,
@@ -378,11 +385,11 @@ def build_pool(
 
     logger.info("Predictions: {} file(s) loaded – {}", len(pred_files), [f.name for f in pred_files])
     try:
-        preds = _load_predictions_wide_mean(pred_files, start)
+        preds = _load_predictions_wide_mean(pred_files, start, end=end)
     except PredictionAlignmentError:
-        preds = _load_predictions_long_form(pred_files, start)
+        preds = _load_predictions_long_form(pred_files, start, end=end)
 
-    market = load_market_data(data_path, start, universe, allow_st_open)
+    market = load_market_data(data_path, start, end, universe, allow_st_open)
     pool = market.join(preds, on=["date", "symbol"], how="left")
     dataset = _encode_dataset(pool)
 
@@ -403,6 +410,7 @@ if __name__ == "__main__":
         bm_path=cfg.BM_PATH,
         horizons=cfg.HORIZONS,
         start=cfg.START,
+        end=cfg.END,
         universe=cfg.UNIVERSE,
         allow_st_open=cfg.ALLOW_ST_OPEN,
         use_cache=cfg.USE_POOL_CACHE,
