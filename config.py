@@ -59,7 +59,9 @@ OUTPUT_DIR = Path(f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}")
 USE_15MIN = True
 DATA_15MIN_PATH = Path("data_15min/vwap_ret_15min.pqt")
 PREDS_15MIN_DIR = Path("data_15min")
-HORIZONS_15MIN = ["3b", "5b", "10b"]
+# HORIZONS_15MIN = ["3b", "5b", "10b"]
+HORIZONS_15MIN = ["2025_12"]
+
 
 # 15-minute execution timing
 TRADE_ON_NEXT_BAR = True
