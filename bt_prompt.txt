@@ -1,5 +1,29 @@
-20260526
+20260530
 
+tradable的逻辑需要更改，部分需要从日频升频至15分钟频。
+现在由daily_with_vwap.parquet 取得的 turnover需要改为从15分钟频行情文件取得(假设新的文件已经有这些列)，另外15分钟频行情文件中会有open，而is_limit_up和is_limit_down需要通过open >= limit_up_price as is_limit_up, 和open <= limit_down_price as is_limit_down得到。注意这里的open是15分钟频，和它比较的limit_up_price 和limit_down_price 依然从日频数据中取。
+同样的，can_trade_buy，can_trade_sell，tradable必须改为15分钟的调仓级别。
+
+
+
+
+tradable的逻辑需要更改，部分需要从日频升频至15分钟频。
+现在由daily_with_vwap.parquet 取得的 turnover需要改为从15分钟频行情文件vwap_ret_15min.parquet取得，另外vwap_ret_15min.parquet中会有open，而is_limit_up和is_limit_down需要通过open >= limit_up_price as is_limit_up, 和open <= limit_down_price as is_limit_down得到。注意这里的open是15分钟频，和它比较的limit_up_price 和limit_down_price 依然从日频数据中取。
+同样的，can_trade_buy，can_trade_sell，tradable必须改为15分钟的调仓级别。给我一个完整的改造方案，注意说明逻辑
+
+
+
+
+
+仔细帮我看一下，现在我的日频all_valid_conditon包括哪些内容，是从什么文件里得到的，那些文件里面包括哪些列，每一列都是什么意思？
+
+
+
+
+
+
+
+20260526
 
 帮我总结整个代码的假设，包括以下问题：
 1、按照15分钟换仓的收益率是如何计算的

@@ -33,7 +33,7 @@ daily = select *,
         next(open) / open - 1 as nd_ret from daily context by symbol csort date
 
 
-daily = select symbol,date,turnover,log_size,size_rank,bfill!(ffill!(industry)) as industry,index,next(nd_ret) as ret, is_limit_up,is_limit_down from daily context by symbol csort date
+daily = select symbol,date,turnover,log_size,size_rank,bfill!(ffill!(industry)) as industry,index,next(nd_ret) as ret, is_limit_up,is_limit_down, limit_up_price, limit_down_price from daily context by symbol csort date
 
 
 def allValidCondition(daily,startDate,listedOver=20){
@@ -57,4 +57,5 @@ def allValidCondition(daily,startDate,listedOver=20){
 daily = select * from allValidCondition(daily,START) where ret is not null
 
 // saveText(daily, "save/daily.csv")
-parquet::saveParquet(daily, "save/daily.pqt")
+// parquet::saveParquet(daily, "save/daily.pqt")
+parquet::saveParquet(daily, "/home/trq/update_daily/daily_with_limit.pqt")

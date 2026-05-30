@@ -32,11 +32,16 @@ result = select * from bar_0931
     select * from bar_1447_1500
 result = select * from result order by datetime, symbol
 // result = select *, vwap15 / prev(vwap15) - 1 as vwap_ret from result context by symbol csort datetime
-result = select symbol, datetime, next(vwap15 / prev(vwap15) - 1) as vwap_ret from result context by symbol csort datetime
+
+
+result = select symbol, datetime, 
+        open,
+        total_turnover as turnover,
+        next(vwap15 / prev(vwap15) - 1) as vwap_ret from result context by symbol csort datetime
 
 
 // saveText(daily, "save/daily.csv")
 // parquet::saveParquet(result, "save/vwap_ret_15min.pqt")
-parquet::saveParquet(result, "/home/trq/update_daily/vwap_ret_15min.pqt")
+// parquet::saveParquet(result, "/home/trq/update_daily/vwap_ret_15min_2025.parquet")
 
 // print(result)

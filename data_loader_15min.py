@@ -22,21 +22,16 @@ from data_loader import load_benchmark
 FLAG_COLUMNS = [
     "date",
     "symbol",
-    "turnover",
     "log_size",
     "size_rank",
     "industry",
     "index",
-    "is_limit_up",
-    "is_limit_down",
+    "limit_up_price",
+    "limit_down_price",
     "listed_Satisfied",
     "is_ST",
     "normal_days",
-    "tradable",
     "can_open_base",
-    "can_trade_buy",
-    "can_trade_sell",
-    "can_open",
 ]
 
 
@@ -86,8 +81,10 @@ def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.Data
     frame = pl.read_parquet(path)
     frame = _normalize_symbol_column(frame)
 
-    if "datetime" not in frame.columns or "vwap_ret" not in frame.columns:
-        raise ValueError("15m market parquet must contain columns: symbol, datetime, vwap_ret")
+    required = {"datetime", "vwap_ret", "open", "turnover"}
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"15m market parquet must contain columns: symbol, datetime, vwap_ret, open, turnover. Missing: {missing}")
 
     if frame["datetime"].dtype == pl.String:
         frame = frame.with_columns(pl.col("datetime").str.strptime(pl.Datetime, strict=False))
@@ -101,7 +98,7 @@ def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.Data
     if end_date is not None:
         out = out.filter(pl.col("date") <= pl.lit(end_date))
 
-    return out.select(["datetime", "date", "symbol", "vwap_ret"]).sort(["datetime", "symbol"])
+    return out.select(["datetime", "date", "symbol", "vwap_ret", "open", "turnover"]).sort(["datetime", "symbol"])
 
 
 def _normalize_prediction_frame(frame: pl.DataFrame) -> pl.DataFrame:
@@ -169,13 +166,9 @@ def load_daily_flags(
     universe: list[str] | None,
     allow_st_open: bool,
 ) -> pl.DataFrame:
-    """Load daily data and keep only trading constraints + diagnostic columns."""
+    """Load daily data and keep daily-level static constraints + limit prices."""
     start_date = date.fromisoformat(start)
     end_date = date.fromisoformat(end) if end else None
-
-    can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
-    can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
-    tradable_expr = can_trade_buy_expr & can_trade_sell_expr
 
     can_open_base_expr = pl.col("normal_days") >= 10
     if not allow_st_open:
@@ -183,18 +176,19 @@ def load_daily_flags(
     if universe is not None:
         can_open_base_expr &= pl.col("index").is_in(universe)
 
-    can_open_expr = tradable_expr & can_open_base_expr
-
     frame = pl.read_parquet(path).filter(pl.col("date") >= pl.lit(start_date))
     if end_date is not None:
         frame = frame.filter(pl.col("date") <= pl.lit(end_date))
 
+    required_daily_cols = {"limit_up_price", "limit_down_price"}
+    missing_daily_cols = sorted(required_daily_cols.difference(frame.columns))
+    if missing_daily_cols:
+        raise ValueError(
+            f"Daily data parquet is missing required columns for 15m limit checks: {missing_daily_cols}"
+        )
+
     frame = frame.with_columns(
-        tradable=tradable_expr,
         can_open_base=can_open_base_expr,
-        can_trade_buy=can_trade_buy_expr,
-        can_trade_sell=can_trade_sell_expr,
-        can_open=can_open_expr,
     ).select(FLAG_COLUMNS).sort(["date", "symbol"])
 
     return frame
@@ -258,6 +252,18 @@ def build_pool_15min(
     pool = (
         market_15m.join(daily_flags, on=["date", "symbol"], how="left")
         .join(preds_15m, on=["datetime", "symbol"], how="left")
+        .with_columns(
+            is_limit_up=(pl.col("open") >= pl.col("limit_up_price")).fill_null(False),
+            is_limit_down=(pl.col("open") <= pl.col("limit_down_price")).fill_null(False),
+        )
+        .with_columns(
+            can_trade_buy=((pl.col("turnover") > 0) & ~pl.col("is_limit_up")).fill_null(False),
+            can_trade_sell=((pl.col("turnover") > 0) & ~pl.col("is_limit_down")).fill_null(False),
+        )
+        .with_columns(
+            tradable=(pl.col("can_trade_buy") & pl.col("can_trade_sell")).fill_null(False),
+            can_open=(pl.col("tradable") & pl.col("can_open_base")).fill_null(False),
+        )
         .sort(["datetime", "symbol"])
     )
 
