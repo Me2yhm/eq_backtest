@@ -260,8 +260,14 @@ def build_pool_15min(
             can_trade_buy=((pl.col("turnover") > 0) & ~pl.col("is_limit_up")).fill_null(False),
             can_trade_sell=((pl.col("turnover") > 0) & ~pl.col("is_limit_down")).fill_null(False),
         )
+        # .with_columns(
+        #     tradable=(pl.col("can_trade_buy") & pl.col("can_trade_sell")).fill_null(False),
+        #     can_open=(pl.col("tradable") & pl.col("can_open_base")).fill_null(False),
+        # )
         .with_columns(
             tradable=(pl.col("can_trade_buy") & pl.col("can_trade_sell")).fill_null(False),
+        )
+        .with_columns(
             can_open=(pl.col("tradable") & pl.col("can_open_base")).fill_null(False),
         )
         .sort(["datetime", "symbol"])

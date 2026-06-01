@@ -42,7 +42,7 @@ else:
     PORT_SIZES = [900]
 
 # thresh_out = port_size + THRESH_OUT_BUFFER  (hysteresis / exit buffer)
-THRESH_OUT_BUFFER = 500
+THRESH_OUT_BUFFER = 600
 TRADE_ON_NEXT_DAY = True  # True: day T signals are executed on day T+1; False: same-day signal/same-day portfolio
 STRICT_FIRST_DAY_TOP_N = False  # True: first day only opens from strict top-N ranks; False: keep scanning until full
 

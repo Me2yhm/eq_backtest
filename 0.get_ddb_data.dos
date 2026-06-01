@@ -1,4 +1,4 @@
-// undef all
+undef all
 
 go
 START = 2019.01.01
