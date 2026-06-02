@@ -171,6 +171,8 @@ def load_daily_flags(
     end_date = date.fromisoformat(end) if end else None
 
     can_open_base_expr = pl.col("normal_days") >= 10
+    # 新增：必须满足 listed_Satisfied == 1
+    can_open_base_expr &= pl.col("listed_Satisfied").cast(pl.Boolean)
     if not allow_st_open:
         can_open_base_expr &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
     if universe is not None:

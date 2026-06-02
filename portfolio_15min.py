@@ -60,6 +60,42 @@ def _build_bar_orders(pool: BacktestDataset15Min, ascending: bool) -> tuple[np.n
     return sorted_rows, offsets
 
 
+def _resolve_debug_target_indices(
+    pool: BacktestDataset15Min,
+    debug_symbol: str | None,
+    debug_datetime: str | None,
+) -> tuple[int, int]:
+    if not debug_symbol or not debug_datetime:
+        return -1, -1
+
+    target_ts = pd.Timestamp(debug_datetime)
+    symbol_map = {sym: idx for idx, sym in enumerate(pool.symbols.tolist())}
+    target_symbol_id = symbol_map.get(debug_symbol, -1)
+    if target_symbol_id < 0:
+        return -1, -1
+
+    bars = pd.to_datetime(pool.bars)
+    matches = np.where(bars == target_ts)[0]
+    if len(matches) == 0:
+        return target_symbol_id, -1
+    return target_symbol_id, int(matches[0])
+
+
+def _debug_reason_text(code: int) -> str:
+    mapping = {
+        101: "目标bar没有可用信号（例如next-bar模式下首bar）",
+        102: "目标股票在信号bar没有有效pred（未进入排序）",
+        103: "目标股票在信号bar不满足size_cut或can_open_base",
+        104: "目标股票在执行bar缺失行情行（exec_row不存在）",
+        105: "目标股票在执行bar不满足can_open（由15分钟tradable与日频开仓条件共同决定）",
+        106: "目标股票当时已持仓（不是新开仓）",
+        107: "开仓前组合已满仓（port_size已占满）",
+        108: "strict_first_bar_top_n限制导致首执行bar未开仓",
+        200: "目标股票成功开仓",
+    }
+    return mapping.get(code, "未命中明确原因（请结合下方状态位判断）")
+
+
 @njit(cache=True)
 def _simulate_portfolio_core_15min(
     bar_offsets: np.ndarray,
@@ -81,6 +117,8 @@ def _simulate_portfolio_core_15min(
     strict_first_bar_top_n: bool,
     trade_on_next_bar: bool,
     is_short: bool,
+    debug_target_symbol_id: int,
+    debug_target_bar_idx: int,
 ) -> tuple:
     n_bars = len(bar_offsets) - 1
     first_execution_bar = 1 if trade_on_next_bar else 0
@@ -115,6 +153,15 @@ def _simulate_portfolio_core_15min(
     rec_tradable = np.empty(record_capacity, dtype=np.bool_)
     rec_count = 0
 
+    debug_reason = -1
+    debug_signal_bar_idx = -1
+    debug_has_signal_row = 0
+    debug_in_size_pool = 0
+    debug_can_open_base = 0
+    debug_signal_rank = 0
+    debug_exec_row_present = 0
+    debug_can_open_exec = 0
+
     portfolio_sign = -1.0 if is_short else 1.0
 
     for bar_idx in range(n_bars):
@@ -131,8 +178,21 @@ def _simulate_portfolio_core_15min(
 
         signal_bar_idx = bar_idx - 1 if trade_on_next_bar else bar_idx
         has_signal = signal_bar_idx >= 0
+        debug_this_bar = (debug_target_symbol_id >= 0) and (debug_target_bar_idx == bar_idx)
+        target_seen_in_sorted = False
+        target_seen_in_open_loop = False
         order_start = 0
         order_end = 0
+
+        if debug_this_bar:
+            debug_signal_bar_idx = signal_bar_idx
+            if not has_signal:
+                debug_reason = 101
+            target_exec_row_idx = current_row[debug_target_symbol_id]
+            if target_exec_row_idx != -1:
+                debug_exec_row_present = 1
+                if can_open[target_exec_row_idx]:
+                    debug_can_open_exec = 1
 
         if has_signal:
             rank = 0
@@ -141,13 +201,22 @@ def _simulate_portfolio_core_15min(
             for pos in range(order_start, order_end):
                 signal_row_idx = sorted_rows[pos]
                 symbol_id = row_symbol_ids[signal_row_idx]
+                if debug_this_bar and symbol_id == debug_target_symbol_id:
+                    target_seen_in_sorted = True
+                    debug_has_signal_row = 1
                 if size_rank[signal_row_idx] < size_cut:
                     signal_in_size_pool[symbol_id] = True
+                    if debug_this_bar and symbol_id == debug_target_symbol_id:
+                        debug_in_size_pool = 1
                     if can_open_base[signal_row_idx]:
                         signal_can_open_pool[symbol_id] = True
+                        if debug_this_bar and symbol_id == debug_target_symbol_id:
+                            debug_can_open_base = 1
                 if signal_can_open_pool[symbol_id] or held[symbol_id]:
                     rank += 1
                     rank_by_symbol[symbol_id] = rank
+                    if debug_this_bar and symbol_id == debug_target_symbol_id:
+                        debug_signal_rank = rank
 
         n_closed = 0
         if has_signal:
@@ -174,13 +243,20 @@ def _simulate_portfolio_core_15min(
         if has_signal:
             for pos in range(order_start, order_end):
                 if held_count == port_size:
+                    if debug_this_bar and debug_reason < 0:
+                        debug_reason = 107
                     break
 
                 signal_row_idx = sorted_rows[pos]
                 symbol_id = row_symbol_ids[signal_row_idx]
                 exec_row_idx = current_row[symbol_id]
+                is_target = debug_this_bar and (symbol_id == debug_target_symbol_id)
+                if is_target:
+                    target_seen_in_open_loop = True
 
                 if bar_idx == first_execution_bar and strict_first_bar_top_n and rank_by_symbol[symbol_id] > port_size:
+                    if is_target and debug_reason < 0:
+                        debug_reason = 108
                     continue
 
                 if (
@@ -192,6 +268,27 @@ def _simulate_portfolio_core_15min(
                     held[symbol_id] = True
                     held_symbols[held_count] = symbol_id
                     held_count += 1
+                    if is_target:
+                        debug_reason = 200
+                elif is_target and debug_reason < 0:
+                    if not signal_can_open_pool[symbol_id]:
+                        debug_reason = 103
+                    elif exec_row_idx == -1:
+                        debug_reason = 104
+                    elif not can_open[exec_row_idx]:
+                        debug_reason = 105
+                    elif held[symbol_id]:
+                        debug_reason = 106
+
+        if debug_this_bar and debug_reason < 0:
+            if not has_signal:
+                debug_reason = 101
+            elif not target_seen_in_sorted:
+                debug_reason = 102
+            elif not target_seen_in_open_loop and held_count == port_size:
+                debug_reason = 107
+            elif debug_has_signal_row == 1 and (debug_in_size_pool == 0 or debug_can_open_base == 0):
+                debug_reason = 103
 
         close_counts[bar_idx] = n_closed
 
@@ -281,6 +378,14 @@ def _simulate_portfolio_core_15min(
         bar_turnover,
         bar_returns,
         held_counts,
+        debug_reason,
+        debug_signal_bar_idx,
+        debug_has_signal_row,
+        debug_in_size_pool,
+        debug_can_open_base,
+        debug_signal_rank,
+        debug_exec_row_present,
+        debug_can_open_exec,
     )
 
 
@@ -386,6 +491,9 @@ def generate_portfolio_15min(
     is_short: bool = True,
     plot_heatmap: bool = True,
     output_dir: str = "output/",
+    debug_mode: bool = False,
+    debug_symbol: str | None = None,
+    debug_datetime: str | None = None,
 ) -> PortfolioResult15Min:
     """Simulate a 15-minute equal-weight portfolio with daily constraints."""
     thresh_out = port_size + thresh_out_buffer
@@ -393,6 +501,9 @@ def generate_portfolio_15min(
 
     can_open_exec = (pool.can_trade_sell if is_short else pool.can_trade_buy) & pool.can_open_base
     can_close_exec = pool.can_trade_buy if is_short else pool.can_trade_sell
+    debug_target_symbol_id, debug_target_bar_idx = (
+        _resolve_debug_target_indices(pool, debug_symbol, debug_datetime) if debug_mode else (-1, -1)
+    )
 
     (
         rec_bar_idx,
@@ -405,6 +516,14 @@ def generate_portfolio_15min(
         turnover_arr,
         port_ret_arr,
         held_counts_arr,
+        debug_reason,
+        debug_signal_bar_idx,
+        debug_has_signal_row,
+        debug_in_size_pool,
+        debug_can_open_base,
+        debug_signal_rank,
+        debug_exec_row_present,
+        debug_can_open_exec,
     ) = _simulate_portfolio_core_15min(
         bar_offsets=pool.bar_offsets,
         sorted_rows=sorted_rows,
@@ -425,7 +544,25 @@ def generate_portfolio_15min(
         strict_first_bar_top_n=strict_first_bar_top_n,
         trade_on_next_bar=trade_on_next_bar,
         is_short=is_short,
+        debug_target_symbol_id=debug_target_symbol_id,
+        debug_target_bar_idx=debug_target_bar_idx,
     )
+
+    if debug_mode:
+        print("\n[DEBUG-15MIN] ----------")
+        print(f"target_symbol={debug_symbol}, target_datetime={debug_datetime}")
+        print(f"resolved_symbol_id={debug_target_symbol_id}, resolved_bar_idx={debug_target_bar_idx}")
+        print(f"signal_bar_idx={debug_signal_bar_idx}, signal_rank={debug_signal_rank}")
+        print(
+            "flags:",
+            f"has_signal_row={bool(debug_has_signal_row)}",
+            f"in_size_pool={bool(debug_in_size_pool)}",
+            f"can_open_base={bool(debug_can_open_base)}",
+            f"exec_row_present={bool(debug_exec_row_present)}",
+            f"can_open_exec={bool(debug_can_open_exec)}",
+        )
+        print(f"decision_code={debug_reason}, reason={_debug_reason_text(int(debug_reason))}")
+        print("[DEBUG-15MIN] ----------\n")
 
     positions = _materialize_positions_15min(
         pool=pool,

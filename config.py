@@ -66,3 +66,8 @@ HORIZONS_15MIN = ["2025_12"]
 # 15-minute execution timing
 TRADE_ON_NEXT_BAR = True
 STRICT_FIRST_BAR_TOP_N = False
+
+# 15-minute debug tracing
+DEBUG_15MIN = False
+DEBUG_SYMBOL_15MIN = "000005.XSHE"
+DEBUG_DATETIME_15MIN = "2019-01-02 09:46:00"

@@ -1,4 +1,9 @@
 20260530
+在2019年1月2日的9：46分这一时刻，000005.XSHE没有进入我的持仓。我想知道他是在哪一步被筛出去的。帮我做最小程度修改，并且用参数使其变成debug模式，加入一些print让我知道是哪一步筛出去的。
+
+
+
+
 
 tradable的逻辑需要更改，部分需要从日频升频至15分钟频。
 现在由daily_with_vwap.parquet 取得的 turnover需要改为从15分钟频行情文件取得(假设新的文件已经有这些列)，另外15分钟频行情文件中会有open，而is_limit_up和is_limit_down需要通过open >= limit_up_price as is_limit_up, 和open <= limit_down_price as is_limit_down得到。注意这里的open是15分钟频，和它比较的limit_up_price 和limit_down_price 依然从日频数据中取。

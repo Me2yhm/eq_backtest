@@ -88,8 +88,12 @@ def _align_benchmark_to_index(bm_ret: pd.Series, index: pd.Index) -> pd.Series:
 
 
 def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
-    frame = pl.from_pandas(positions.reset_index()).with_columns(pl.col("date").cast(pl.Date))
+    df = positions.reset_index()
+    # 直接将 DataFrame 转换为 Polars，不改变 date 列的类型
+    frame = pl.from_pandas(df)
     frame.write_csv(output_path)
+    # frame = pl.from_pandas(positions.reset_index()).with_columns(pl.col("date").cast(pl.Date))
+    # frame.write_csv(output_path)
 
 
 def _build_portfolio_pnl_frame(
@@ -204,6 +208,9 @@ def run() -> None:
                 strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
                 is_short=cfg.IS_SHORT,
                 output_dir=output_dir,
+                debug_mode=cfg.DEBUG_15MIN,
+                debug_symbol=cfg.DEBUG_SYMBOL_15MIN,
+                debug_datetime=cfg.DEBUG_DATETIME_15MIN,
             )
         else:
             result = generate_portfolio(
