@@ -37,6 +37,7 @@ result = select * from result order by datetime, symbol
 result = select symbol, datetime, 
         open,
         total_turnover as turnover,
+        vwap15,
         next(vwap15 / prev(vwap15) - 1) as vwap_ret from result context by symbol csort datetime
 
 
