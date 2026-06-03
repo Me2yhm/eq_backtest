@@ -1,7 +1,23 @@
 20260603
 
 
-我需要你帮我开发一个脚本plot_sactters_pred_label.py，用来绘制散点图prediction和label列的散点图，并在左上角输出计算好的IC均值和rankIC均值
+这个脚本里有一个比较大的问题，统一使用的是用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC；帮我改成使用prediction作为预测值，label作为收益率计算IC，rankIC
+
+
+
+
+
+脚本plot_sactters_pred_label.py是用来绘制散点图prediction和label列的散点图的脚本，它有3张散点图：
+a）所有去掉涨跌停的票的所有时间，用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC，画prediction和label的散点图
+b）所有去掉涨跌停的，预测值截面排名前1000的票的所有时间，用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC，画prediction和label的散点图
+c）所有去掉涨跌停的，预测值截面排名后500的票的所有时间，用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC，画prediction和label的散点图
+
+
+现在再帮我加一个不去掉涨跌停的票的所有时间，用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC，画prediction和label的散点图
+
+
+
+我需要你帮我单独开发一个脚本plot_sactters_pred_label.py，用来绘制散点图prediction和label列的散点图，并在左上角输出计算好的IC均值和rankIC均值
 
 从/ext/trq获取predictions.parquet文件，取到trade_date，stock_code，prediction，label列。之后从/home/danny/backtest_verify/eq-backtest/data_15min获取15min_bar_full.parquet，取到symbol，datetime，vwap15列和vwap_ret列。再从/home/danny/backtest_verify/eq-backtest/data取到daily_with_limit.pqt，获取symbol，date，limit_up_price，limit_down_price
 。
