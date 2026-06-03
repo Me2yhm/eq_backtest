@@ -81,10 +81,10 @@ def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.Data
     frame = pl.read_parquet(path)
     frame = _normalize_symbol_column(frame)
 
-    required = {"datetime", "vwap_ret", "open", "turnover"}
+    required = {"datetime", "vwap_ret", "vwap15", "turnover"}
     missing = sorted(required.difference(frame.columns))
     if missing:
-        raise ValueError(f"15m market parquet must contain columns: symbol, datetime, vwap_ret, open, turnover. Missing: {missing}")
+        raise ValueError(f"15m market parquet must contain columns: symbol, datetime, vwap_ret, vwap15, turnover. Missing: {missing}")
 
     if frame["datetime"].dtype == pl.String:
         frame = frame.with_columns(pl.col("datetime").str.strptime(pl.Datetime, strict=False))
@@ -98,7 +98,7 @@ def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.Data
     if end_date is not None:
         out = out.filter(pl.col("date") <= pl.lit(end_date))
 
-    return out.select(["datetime", "date", "symbol", "vwap_ret", "open", "turnover"]).sort(["datetime", "symbol"])
+    return out.select(["datetime", "date", "symbol", "vwap_ret", "vwap15", "turnover"]).sort(["datetime", "symbol"])
 
 
 def _normalize_prediction_frame(frame: pl.DataFrame) -> pl.DataFrame:
@@ -255,8 +255,8 @@ def build_pool_15min(
         market_15m.join(daily_flags, on=["date", "symbol"], how="left")
         .join(preds_15m, on=["datetime", "symbol"], how="left")
         .with_columns(
-            is_limit_up=(pl.col("open") >= pl.col("limit_up_price")).fill_null(False),
-            is_limit_down=(pl.col("open") <= pl.col("limit_down_price")).fill_null(False),
+            is_limit_up=(pl.col("vwap15") >= pl.col("limit_up_price")).fill_null(False),
+            is_limit_down=(pl.col("vwap15") <= pl.col("limit_down_price")).fill_null(False),
         )
         .with_columns(
             can_trade_buy=((pl.col("turnover") > 0) & ~pl.col("is_limit_up")).fill_null(False),

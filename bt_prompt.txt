@@ -1,6 +1,23 @@
 20260603
 
-11：31分的问题
+
+我需要你帮我开发一个脚本plot_sactters_pred_label.py，用来绘制散点图prediction和label列的散点图，并在左上角输出计算好的IC均值和rankIC均值
+
+从/ext/trq获取predictions.parquet文件，取到trade_date，stock_code，prediction，label列。之后从/home/danny/backtest_verify/eq-backtest/data_15min获取15min_bar_full.parquet，取到symbol，datetime，vwap15列和vwap_ret列。再从/home/danny/backtest_verify/eq-backtest/data取到daily_with_limit.pqt，获取symbol，date，limit_up_price，limit_down_price
+。
+1、按照和本项目相同的逻辑，去掉所有涨跌停的票。即使用vwap15和日limit_up_price/limit_down_price相比，去掉每个15分钟中涨跌停的票。
+2、分三种情况计算IC,rankIC并画散点图
+a）所有去掉涨跌停的票的所有时间，用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC，画prediction和label的散点图
+b）所有去掉涨跌停的，预测值截面排名前1000的票的所有时间，用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC，画prediction和label的散点图
+c）所有去掉涨跌停的，预测值截面排名后500的票的所有时间，用prediction作为预测值，vwap_ret作为收益率计算IC，rankIC，画prediction和label的散点图
+
+
+
+分三步
+1、直接画散点图
+2、直接
+
+
 
 
 
