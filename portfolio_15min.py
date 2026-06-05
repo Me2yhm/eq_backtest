@@ -91,7 +91,17 @@ def _debug_reason_text(code: int) -> str:
         106: "目标股票当时已持仓（不是新开仓）",
         107: "开仓前组合已满仓（port_size已占满）",
         108: "strict_first_bar_top_n限制导致首执行bar未开仓",
+    109: "信号bar无任何有效预测值（排序列表为空），本bar不执行调仓",
         200: "目标股票成功开仓",
+        301: "目标股票在该bar调仓前并未持仓（无平仓动作）",
+        302: "目标股票受T+0限制，当天新开后不可卖出",
+        303: "目标股票在执行bar缺失行情行（无法平仓判断）",
+        304: "目标股票在执行bar不满足can_close（不可卖出）",
+        305: "目标股票在可平仓池排名超过阈值（rank > thresh_out）触发平仓",
+        306: "目标股票跌出size池（close_on_size_drop）触发平仓",
+        307: "目标股票同时满足排名阈值与size池跌出，触发平仓",
+        308: "目标股票满足可卖条件，但未触发任何平仓规则（继续持有）",
+        309: "信号bar无任何有效预测值（排序列表为空），本bar不执行平仓/开仓",
     }
     return mapping.get(code, "未命中明确原因（请结合下方状态位判断）")
 
@@ -164,6 +174,11 @@ def _simulate_portfolio_core_15min(
     debug_signal_rank = 0
     debug_exec_row_present = 0
     debug_can_open_exec = 0
+    debug_close_reason = -1
+    debug_target_held_before_close = 0
+    debug_can_sell_today = 0
+    debug_can_close_exec = 0
+    debug_close_rank = 0
 
     portfolio_sign = -1.0 if is_short else 1.0
 
@@ -187,6 +202,7 @@ def _simulate_portfolio_core_15min(
         target_seen_in_open_loop = False
         order_start = 0
         order_end = 0
+        has_ranked_signal = False
 
         if debug_this_bar:
             debug_signal_bar_idx = signal_bar_idx
@@ -203,46 +219,87 @@ def _simulate_portfolio_core_15min(
             close_rank = 0
             order_start = sorted_offsets[signal_bar_idx]
             order_end = sorted_offsets[signal_bar_idx + 1]
-            for pos in range(order_start, order_end):
-                signal_row_idx = sorted_rows[pos]
-                symbol_id = row_symbol_ids[signal_row_idx]
-                exec_row_idx = current_row[symbol_id]
-                if debug_this_bar and symbol_id == debug_target_symbol_id:
-                    target_seen_in_sorted = True
-                    debug_has_signal_row = 1
+            has_ranked_signal = order_end > order_start
+            if not has_ranked_signal and debug_this_bar:
+                if debug_reason < 0:
+                    debug_reason = 109
+                if debug_close_reason < 0:
+                    debug_close_reason = 309
 
-                if exec_row_idx != -1 and can_close[exec_row_idx]:
-                    close_rank += 1
-                    close_rank_by_symbol[symbol_id] = close_rank
-
-                if size_rank[signal_row_idx] < size_cut:
-                    signal_in_size_pool[symbol_id] = True
+            if not has_ranked_signal:
+                close_rank = 0
+                rank = 0
+            else:
+                for pos in range(order_start, order_end):
+                    signal_row_idx = sorted_rows[pos]
+                    symbol_id = row_symbol_ids[signal_row_idx]
+                    exec_row_idx = current_row[symbol_id]
                     if debug_this_bar and symbol_id == debug_target_symbol_id:
-                        debug_in_size_pool = 1
-                    if can_open_base[signal_row_idx]:
-                        signal_can_open_pool[symbol_id] = True
+                        target_seen_in_sorted = True
+                        debug_has_signal_row = 1
+
+                    if exec_row_idx != -1 and can_close[exec_row_idx]:
+                        close_rank += 1
+                        close_rank_by_symbol[symbol_id] = close_rank
+
+                    if size_rank[signal_row_idx] < size_cut:
+                        signal_in_size_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
-                            debug_can_open_base = 1
-                if signal_can_open_pool[symbol_id] or held[symbol_id]:
-                    rank += 1
-                    rank_by_symbol[symbol_id] = rank
-                    if debug_this_bar and symbol_id == debug_target_symbol_id:
-                        debug_signal_rank = rank
+                            debug_in_size_pool = 1
+                        if can_open_base[signal_row_idx]:
+                            signal_can_open_pool[symbol_id] = True
+                            if debug_this_bar and symbol_id == debug_target_symbol_id:
+                                debug_can_open_base = 1
+                    if signal_can_open_pool[symbol_id] or held[symbol_id]:
+                        rank += 1
+                        rank_by_symbol[symbol_id] = rank
+                        if debug_this_bar and symbol_id == debug_target_symbol_id:
+                            debug_signal_rank = rank
 
         n_closed = 0
-        if has_signal:
+        if has_signal and has_ranked_signal:
             new_count = 0
             for i in range(held_count):
                 symbol_id = held_symbols[i]
                 row_idx = current_row[symbol_id]
                 should_close = False
                 can_sell_today = entry_day_by_symbol[symbol_id] >= 0 and entry_day_by_symbol[symbol_id] < bar_day_index[bar_idx]
+                is_target_close = debug_this_bar and (symbol_id == debug_target_symbol_id)
+
+                if is_target_close:
+                    debug_target_held_before_close = 1
+                    if can_sell_today:
+                        debug_can_sell_today = 1
+                    if row_idx != -1 and can_close[row_idx]:
+                        debug_can_close_exec = 1
+                    if close_rank_by_symbol[symbol_id] > 0:
+                        debug_close_rank = close_rank_by_symbol[symbol_id]
 
                 if can_sell_today and row_idx != -1 and can_close[row_idx]:
-                    if close_rank_by_symbol[symbol_id] == 0 or close_rank_by_symbol[symbol_id] > thresh_out:
+                    rank_rule = close_rank_by_symbol[symbol_id] == 0 or close_rank_by_symbol[symbol_id] > thresh_out
+                    size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
+
+                    if rank_rule:
                         should_close = True
-                    if close_on_size_drop and not signal_in_size_pool[symbol_id]:
+                    if size_rule:
                         should_close = True
+
+                    if is_target_close and should_close and debug_close_reason < 0:
+                        if rank_rule and size_rule:
+                            debug_close_reason = 307
+                        elif rank_rule:
+                            debug_close_reason = 305
+                        elif size_rule:
+                            debug_close_reason = 306
+                    elif is_target_close and not should_close and debug_close_reason < 0:
+                        debug_close_reason = 308
+                elif is_target_close and debug_close_reason < 0:
+                    if not can_sell_today:
+                        debug_close_reason = 302
+                    elif row_idx == -1:
+                        debug_close_reason = 303
+                    else:
+                        debug_close_reason = 304
 
                 if should_close:
                     held[symbol_id] = False
@@ -252,7 +309,11 @@ def _simulate_portfolio_core_15min(
                     new_count += 1
             held_count = new_count
 
-        if has_signal:
+        if debug_this_bar and debug_close_reason < 0 and has_signal and has_ranked_signal:
+            if debug_target_held_before_close == 0:
+                debug_close_reason = 301
+
+        if has_signal and has_ranked_signal:
             for pos in range(order_start, order_end):
                 if held_count == port_size:
                     if debug_this_bar and debug_reason < 0:
@@ -399,6 +460,11 @@ def _simulate_portfolio_core_15min(
         debug_signal_rank,
         debug_exec_row_present,
         debug_can_open_exec,
+        debug_close_reason,
+        debug_target_held_before_close,
+        debug_can_sell_today,
+        debug_can_close_exec,
+        debug_close_rank,
     )
 
 
@@ -539,6 +605,11 @@ def generate_portfolio_15min(
         debug_signal_rank,
         debug_exec_row_present,
         debug_can_open_exec,
+        debug_close_reason,
+        debug_target_held_before_close,
+        debug_can_sell_today,
+        debug_can_close_exec,
+        debug_close_rank,
     ) = _simulate_portfolio_core_15min(
         bar_offsets=pool.bar_offsets,
         bar_day_index=bar_day_index,
@@ -576,8 +647,13 @@ def generate_portfolio_15min(
             f"can_open_base={bool(debug_can_open_base)}",
             f"exec_row_present={bool(debug_exec_row_present)}",
             f"can_open_exec={bool(debug_can_open_exec)}",
+            f"held_before_close={bool(debug_target_held_before_close)}",
+            f"can_sell_today={bool(debug_can_sell_today)}",
+            f"can_close_exec={bool(debug_can_close_exec)}",
+            f"close_rank={int(debug_close_rank)}",
         )
         print(f"decision_code={debug_reason}, reason={_debug_reason_text(int(debug_reason))}")
+        print(f"close_decision_code={debug_close_reason}, close_reason={_debug_reason_text(int(debug_close_reason))}")
         print("[DEBUG-15MIN] ----------\n")
 
     positions = _materialize_positions_15min(
