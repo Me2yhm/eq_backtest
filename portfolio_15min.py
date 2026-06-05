@@ -99,6 +99,7 @@ def _debug_reason_text(code: int) -> str:
 @njit(cache=True)
 def _simulate_portfolio_core_15min(
     bar_offsets: np.ndarray,
+    bar_day_index: np.ndarray,
     sorted_rows: np.ndarray,
     sorted_offsets: np.ndarray,
     row_symbol_ids: np.ndarray,
@@ -129,6 +130,7 @@ def _simulate_portfolio_core_15min(
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
     signal_can_open_pool = np.zeros(n_symbols, dtype=np.bool_)
     held_symbols = np.full(port_size, -1, dtype=np.int32)
+    entry_day_by_symbol = np.full(n_symbols, -1, dtype=np.int32)
 
     prev_weights = np.zeros(n_symbols, dtype=np.float64)
     curr_weights = np.zeros(n_symbols, dtype=np.float64)
@@ -225,8 +227,9 @@ def _simulate_portfolio_core_15min(
                 symbol_id = held_symbols[i]
                 row_idx = current_row[symbol_id]
                 should_close = False
+                can_sell_today = entry_day_by_symbol[symbol_id] >= 0 and entry_day_by_symbol[symbol_id] < bar_day_index[bar_idx]
 
-                if row_idx != -1 and can_close[row_idx]:
+                if can_sell_today and row_idx != -1 and can_close[row_idx]:
                     if rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out:
                         should_close = True
                     if close_on_size_drop and not signal_in_size_pool[symbol_id]:
@@ -266,6 +269,7 @@ def _simulate_portfolio_core_15min(
                     and not held[symbol_id]
                 ):
                     held[symbol_id] = True
+                    entry_day_by_symbol[symbol_id] = bar_day_index[bar_idx]
                     held_symbols[held_count] = symbol_id
                     held_count += 1
                     if is_target:
@@ -501,6 +505,8 @@ def generate_portfolio_15min(
 
     can_open_exec = (pool.can_trade_sell if is_short else pool.can_trade_buy) & pool.can_open_base
     can_close_exec = pool.can_trade_buy if is_short else pool.can_trade_sell
+    bars = pd.to_datetime(pool.bars)
+    bar_day_index = pd.factorize(bars.normalize())[0].astype(np.int32)
     debug_target_symbol_id, debug_target_bar_idx = (
         _resolve_debug_target_indices(pool, debug_symbol, debug_datetime) if debug_mode else (-1, -1)
     )
@@ -526,6 +532,7 @@ def generate_portfolio_15min(
         debug_can_open_exec,
     ) = _simulate_portfolio_core_15min(
         bar_offsets=pool.bar_offsets,
+        bar_day_index=bar_day_index,
         sorted_rows=sorted_rows,
         sorted_offsets=sorted_offsets,
         row_symbol_ids=pool.row_symbol_ids,
@@ -574,7 +581,6 @@ def generate_portfolio_15min(
         rec_tradable=rec_tradable,
     )
 
-    bars = pd.to_datetime(pool.bars)
     close_counts = pd.DataFrame({"n_closed": close_counts_arr}, index=bars)
     portfolio_returns = pd.Series(port_ret_arr, index=bars, name="portfolio_return")
     turnover = pd.Series(turnover_arr, index=bars, name="turnover")
