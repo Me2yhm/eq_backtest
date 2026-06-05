@@ -127,6 +127,7 @@ def _simulate_portfolio_core_15min(
     held = np.zeros(n_symbols, dtype=np.bool_)
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
+    close_rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
     signal_can_open_pool = np.zeros(n_symbols, dtype=np.bool_)
     held_symbols = np.full(port_size, -1, dtype=np.int32)
@@ -169,6 +170,7 @@ def _simulate_portfolio_core_15min(
     for bar_idx in range(n_bars):
         current_row[:] = -1
         rank_by_symbol[:] = 0
+        close_rank_by_symbol[:] = 0
         signal_in_size_pool[:] = False
         signal_can_open_pool[:] = False
 
@@ -198,14 +200,21 @@ def _simulate_portfolio_core_15min(
 
         if has_signal:
             rank = 0
+            close_rank = 0
             order_start = sorted_offsets[signal_bar_idx]
             order_end = sorted_offsets[signal_bar_idx + 1]
             for pos in range(order_start, order_end):
                 signal_row_idx = sorted_rows[pos]
                 symbol_id = row_symbol_ids[signal_row_idx]
+                exec_row_idx = current_row[symbol_id]
                 if debug_this_bar and symbol_id == debug_target_symbol_id:
                     target_seen_in_sorted = True
                     debug_has_signal_row = 1
+
+                if exec_row_idx != -1 and can_close[exec_row_idx]:
+                    close_rank += 1
+                    close_rank_by_symbol[symbol_id] = close_rank
+
                 if size_rank[signal_row_idx] < size_cut:
                     signal_in_size_pool[symbol_id] = True
                     if debug_this_bar and symbol_id == debug_target_symbol_id:
@@ -230,7 +239,7 @@ def _simulate_portfolio_core_15min(
                 can_sell_today = entry_day_by_symbol[symbol_id] >= 0 and entry_day_by_symbol[symbol_id] < bar_day_index[bar_idx]
 
                 if can_sell_today and row_idx != -1 and can_close[row_idx]:
-                    if rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out:
+                    if close_rank_by_symbol[symbol_id] == 0 or close_rank_by_symbol[symbol_id] > thresh_out:
                         should_close = True
                     if close_on_size_drop and not signal_in_size_pool[symbol_id]:
                         should_close = True
