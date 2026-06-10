@@ -238,7 +238,7 @@ def _simulate_portfolio_core_15min(
                         target_seen_in_sorted = True
                         debug_has_signal_row = 1
 
-                    if exec_row_idx != -1 and can_close[exec_row_idx]:
+                    if can_open_base[signal_row_idx]:
                         close_rank += 1
                         close_rank_by_symbol[symbol_id] = close_rank
 
@@ -246,10 +246,12 @@ def _simulate_portfolio_core_15min(
                         signal_in_size_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_in_size_pool = 1
-                        if can_open_base[signal_row_idx]:
-                            signal_can_open_pool[symbol_id] = True
-                            if debug_this_bar and symbol_id == debug_target_symbol_id:
-                                debug_can_open_base = 1
+
+                    if can_open_base[signal_row_idx]:
+                        signal_can_open_pool[symbol_id] = True
+                        if debug_this_bar and symbol_id == debug_target_symbol_id:
+                            debug_can_open_base = 1
+
                     if signal_can_open_pool[symbol_id] or held[symbol_id]:
                         rank += 1
                         rank_by_symbol[symbol_id] = rank
