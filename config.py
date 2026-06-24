@@ -39,7 +39,7 @@ if IS_SHORT:
     PORT_SIZES = [200, 300, 400]
 else:
     POOL_SIZE = 4400
-    PORT_SIZES = [900]
+    PORT_SIZES = [800]
 
 # thresh_out = port_size + THRESH_OUT_BUFFER  (hysteresis / exit buffer)
 THRESH_OUT_BUFFER = 600
@@ -57,10 +57,10 @@ OUTPUT_DIR = Path(f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}")
 
 # ── 15-minute backtest mode ───────────────────────────────────────────────────
 USE_15MIN = True
-DATA_15MIN_PATH = Path("data_15min/vwap_ret_15min.pqt")
-PREDS_15MIN_DIR = Path("data_15min")
+DATA_15MIN_PATH = Path("/ext/eq_data/15min_bar_full_not_1500.parquet")
+PREDS_15MIN_DIR = Path("/ext/trq")
 # HORIZONS_15MIN = ["3b", "5b", "10b"]
-HORIZONS_15MIN = ["2025_12"]
+HORIZONS_15MIN = ["predictions"]
 
 
 # 15-minute execution timing
@@ -69,5 +69,5 @@ STRICT_FIRST_BAR_TOP_N = False
 
 # 15-minute debug tracing
 DEBUG_15MIN = False
-DEBUG_SYMBOL_15MIN = "000919.XSHE"
+DEBUG_SYMBOL_15MIN = "300169.XSHE"
 DEBUG_DATETIME_15MIN = "2019-01-03 09:46:00"
