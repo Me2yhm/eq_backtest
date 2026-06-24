@@ -13,9 +13,9 @@ END = "2026-01-01"
 
 # ── Data paths ────────────────────────────────────────────────────────────────
 # DATA_PATH = Path("data/daily.pqt")
-DATA_PATH = Path("data/daily_with_vwap.parquet")
+DATA_PATH = Path("/ext/eq_data/daily_with_limit.pqt")
 PREDS_DIR = Path("data/preds_size")
-BM_PATH = Path("data/bm_open/ret_csi_1000.csv")
+BM_PATH = Path("/ext/eq_data/ret_csi_1000.csv")
 POOL_CACHE_DIR = Path("data/.cache")
 USE_POOL_CACHE = True
 
