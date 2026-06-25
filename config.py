@@ -71,3 +71,6 @@ STRICT_FIRST_BAR_TOP_N = False
 DEBUG_15MIN = False
 DEBUG_SYMBOL_15MIN = "300169.XSHE"
 DEBUG_DATETIME_15MIN = "2019-01-03 09:46:00"
+
+# ── Close on size drop ─────────────────────────────────────────────────────────
+CLOSE_ON_SIZE_DROP = False  # True: close positions when they drop out of size pool; False: keep holding as long as still valid_listed (matches external _drop_out_of_universe_immediate=false)

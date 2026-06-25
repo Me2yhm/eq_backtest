@@ -203,7 +203,7 @@ def run() -> None:
                 port_size=port_size,
                 thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
                 size_cut=cfg.POOL_SIZE,
-                close_on_size_drop=True,
+                close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
                 trade_on_next_bar=cfg.TRADE_ON_NEXT_BAR,
                 strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
                 is_short=cfg.IS_SHORT,
@@ -218,7 +218,7 @@ def run() -> None:
                 port_size=port_size,
                 thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
                 size_cut=cfg.POOL_SIZE,
-                close_on_size_drop=True,
+                close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
                 trade_on_next_day=cfg.TRADE_ON_NEXT_DAY,
                 strict_first_day_top_n=cfg.STRICT_FIRST_DAY_TOP_N,
                 is_short=cfg.IS_SHORT,
@@ -233,9 +233,9 @@ def run() -> None:
             portfolio_returns_eval = daily_returns_from_15min(result.portfolio_returns)
             cost_turnover_eval = daily_sum_from_15min(result.cost_turnover, "cost_turnover")
             turnover_eval = daily_sum_from_15min(result.turnover, "turnover")
-            close_counts_eval = pd.DataFrame(
-                {"n_closed": daily_sum_from_15min(close_counts["n_closed"], "n_closed").astype(int)}
-            )
+            close_counts_eval = pd.DataFrame({
+                "n_closed": daily_sum_from_15min(close_counts["n_closed"], "n_closed").astype(int)
+            })
         else:
             portfolio_returns_eval = result.portfolio_returns
             cost_turnover_eval = result.cost_turnover
