@@ -84,7 +84,9 @@ def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.Data
     required = {"datetime", "vwap_ret", "vwap15", "turnover"}
     missing = sorted(required.difference(frame.columns))
     if missing:
-        raise ValueError(f"15m market parquet must contain columns: symbol, datetime, vwap_ret, vwap15, turnover. Missing: {missing}")
+        raise ValueError(
+            f"15m market parquet must contain columns: symbol, datetime, vwap_ret, vwap15, turnover. Missing: {missing}"
+        )
 
     if frame["datetime"].dtype == pl.String:
         frame = frame.with_columns(pl.col("datetime").str.strptime(pl.Datetime, strict=False))
@@ -105,9 +107,11 @@ def _normalize_prediction_frame(frame: pl.DataFrame) -> pl.DataFrame:
     columns = set(frame.columns)
 
     if {"trade_date", "stock_code", "prediction"}.issubset(columns):
-        out = frame.select(["trade_date", "stock_code", "prediction"]).rename(
-            {"trade_date": "datetime", "stock_code": "symbol", "prediction": "pred"}
-        )
+        out = frame.select(["trade_date", "stock_code", "prediction"]).rename({
+            "trade_date": "datetime",
+            "stock_code": "symbol",
+            "prediction": "pred",
+        })
         return out
 
     if {"datetime", "symbol", "pred"}.issubset(columns):
@@ -144,7 +148,9 @@ def load_15min_predictions(preds_dir: Path, horizons: list[str], start: str, end
         else:
             frame = frame.with_columns(pl.col("datetime").cast(pl.Datetime))
 
-        frame = frame.with_columns(pl.col("datetime").dt.date().alias("date")).filter(pl.col("date") >= pl.lit(start_date))
+        frame = frame.with_columns(pl.col("datetime").dt.date().alias("date")).filter(
+            pl.col("date") >= pl.lit(start_date)
+        )
         if end_date is not None:
             frame = frame.filter(pl.col("date") <= pl.lit(end_date))
         stacked.append(frame.select(["datetime", "symbol", "pred"]))
@@ -152,7 +158,8 @@ def load_15min_predictions(preds_dir: Path, horizons: list[str], start: str, end
     logger.info("15m predictions: {} file(s) loaded – {}", len(files), [f.name for f in files])
 
     return (
-        pl.concat(stacked, how="vertical")
+        pl
+        .concat(stacked, how="vertical")
         .group_by(["datetime", "symbol"], maintain_order=True)
         .agg(pl.col("pred").mean().alias("pred"))
         .sort(["datetime", "symbol"])
@@ -185,13 +192,16 @@ def load_daily_flags(
     required_daily_cols = {"limit_up_price", "limit_down_price"}
     missing_daily_cols = sorted(required_daily_cols.difference(frame.columns))
     if missing_daily_cols:
-        raise ValueError(
-            f"Daily data parquet is missing required columns for 15m limit checks: {missing_daily_cols}"
-        )
+        raise ValueError(f"Daily data parquet is missing required columns for 15m limit checks: {missing_daily_cols}")
 
-    frame = frame.with_columns(
-        can_open_base=can_open_base_expr,
-    ).select(FLAG_COLUMNS).sort(["date", "symbol"])
+    frame = (
+        frame
+        .with_columns(
+            can_open_base=can_open_base_expr,
+        )
+        .select(FLAG_COLUMNS)
+        .sort(["date", "symbol"])
+    )
 
     return frame
 
@@ -252,26 +262,28 @@ def build_pool_15min(
     preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start, end=end)
 
     pool = (
-        market_15m.join(daily_flags, on=["date", "symbol"], how="left")
+        market_15m
+        .join(daily_flags, on=["date", "symbol"], how="left")
         .join(preds_15m, on=["datetime", "symbol"], how="left")
         .with_columns(
-            is_limit_up=(pl.col("vwap15") >= pl.col("limit_up_price")).fill_null(False),
-            is_limit_down=(pl.col("vwap15") <= pl.col("limit_down_price")).fill_null(False),
+            limit_up_hit=((pl.col("vwap15") - pl.col("limit_up_price")).abs() <= 0.0005).fill_null(False),
+            limit_down_hit=((pl.col("vwap15") - pl.col("limit_down_price")).abs() <= 0.0005).fill_null(False),
         )
         .with_columns(
-            can_trade_buy=((pl.col("turnover") > 0) & ~pl.col("is_limit_up")).fill_null(False),
-            can_trade_sell=((pl.col("turnover") > 0) & ~pl.col("is_limit_down")).fill_null(False),
+            can_trade_buy=((pl.col("turnover") > 0) & ~pl.col("limit_up_hit")).fill_null(False),
+            can_trade_sell=((pl.col("turnover") > 0) & ~pl.col("limit_down_hit")).fill_null(False),
         )
-        # .with_columns(
-        #     tradable=(pl.col("can_trade_buy") & pl.col("can_trade_sell")).fill_null(False),
-        #     can_open=(pl.col("tradable") & pl.col("can_open_base")).fill_null(False),
-        # )
+        .with_columns(
+            is_limit_up=pl.col("limit_up_hit"),
+            is_limit_down=pl.col("limit_down_hit"),
+        )
         .with_columns(
             tradable=(pl.col("can_trade_buy") & pl.col("can_trade_sell")).fill_null(False),
         )
         .with_columns(
             can_open=(pl.col("tradable") & pl.col("can_open_base")).fill_null(False),
         )
+        .drop(["limit_up_hit", "limit_down_hit"])
         .sort(["datetime", "symbol"])
     )
 
