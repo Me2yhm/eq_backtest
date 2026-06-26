@@ -8,7 +8,7 @@ from pathlib import Path
 # ── Time range ────────────────────────────────────────────────────────────────
 START = "2019-01-02"
 # END = None  # e.g. "2026-01-01"; None means no cutoff
-END = "2026-01-01"
+END = "2019-01-03"
 
 
 # ── Data paths ────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ HORIZONS_15MIN = ["predictions"]
 
 
 # 15-minute execution timing
-TRADE_ON_NEXT_BAR = True
+TRADE_ON_NEXT_BAR = False
 STRICT_FIRST_BAR_TOP_N = False
 
 # 15-minute debug tracing
