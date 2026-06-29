@@ -91,7 +91,7 @@ def _debug_reason_text(code: int) -> str:
         106: "目标股票当时已持仓（不是新开仓）",
         107: "开仓前组合已满仓（port_size已占满）",
         108: "strict_first_bar_top_n限制导致首执行bar未开仓",
-    109: "信号bar无任何有效预测值（排序列表为空），本bar不执行调仓",
+        109: "信号bar无任何有效预测值（排序列表为空），本bar不执行调仓",
         200: "目标股票成功开仓",
         301: "目标股票在该bar调仓前并未持仓（无平仓动作）",
         302: "目标股票受T+0限制，当天新开后不可卖出",
@@ -133,33 +133,53 @@ def _simulate_portfolio_core_15min(
 ) -> tuple:
     n_bars = len(bar_offsets) - 1
     first_execution_bar = 1 if trade_on_next_bar else 0
+    eps = 1e-12
 
+    # target: ideal/rank-band layer. held: actual layer presence mirror.
+    target = np.zeros(n_symbols, dtype=np.bool_)
     held = np.zeros(n_symbols, dtype=np.bool_)
+    current_weights = np.zeros(n_symbols, dtype=np.float64)
+    frozen_weights = np.zeros(n_symbols, dtype=np.float64)
+    cash_weight = 1.0
+
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     close_rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
     signal_can_open_pool = np.zeros(n_symbols, dtype=np.bool_)
-    held_symbols = np.full(port_size, -1, dtype=np.int32)
-    entry_day_by_symbol = np.full(n_symbols, -1, dtype=np.int32)
+
+    # Actual holdings can temporarily exceed port_size because T+1 frozen names
+    # may coexist with newly opened target names.
+    held_symbols = np.full(n_symbols, -1, dtype=np.int32)
+    target_symbols = np.full(port_size, -1, dtype=np.int32)
+    sell_candidates = np.full(n_symbols, -1, dtype=np.int32)
+    sell_keys = np.empty(n_symbols, dtype=np.float64)
+    buy_candidates = np.full(n_symbols, -1, dtype=np.int32)
+    buy_keys = np.empty(n_symbols, dtype=np.float64)
+    buy_existing = np.zeros(n_symbols, dtype=np.bool_)
 
     prev_weights = np.zeros(n_symbols, dtype=np.float64)
     curr_weights = np.zeros(n_symbols, dtype=np.float64)
     prev_symbols = np.full(n_symbols, -1, dtype=np.int32)
-    curr_symbols = np.full(port_size, -1, dtype=np.int32)
+    curr_symbols = np.full(n_symbols, -1, dtype=np.int32)
     touched = np.zeros(n_symbols, dtype=np.bool_)
     touched_symbols = np.full(n_symbols, -1, dtype=np.int32)
 
     held_count = 0
+    target_count = 0
     prev_count = 0
     close_counts = np.zeros(n_bars, dtype=np.int32)
     bar_turnover = np.zeros(n_bars, dtype=np.float64)
     bar_returns = np.zeros(n_bars, dtype=np.float64)
     held_counts = np.zeros(n_bars, dtype=np.int32)
 
-    record_capacity = n_bars * port_size
+    # Exact recording capacity for the current run. This can be larger than the
+    # previous n_bars * port_size bound because progressive actual holdings can
+    # exceed ideal count intraday.
+    record_capacity = n_bars * n_symbols
     rec_bar_idx = np.empty(record_capacity, dtype=np.int32)
     rec_source_row = np.empty(record_capacity, dtype=np.int64)
+    rec_weight = np.empty(record_capacity, dtype=np.float64)
     rec_pred_rank = np.empty(record_capacity, dtype=np.float64)
     rec_size_rank = np.empty(record_capacity, dtype=np.float64)
     rec_vwap_ret = np.empty(record_capacity, dtype=np.float64)
@@ -183,6 +203,12 @@ def _simulate_portfolio_core_15min(
     portfolio_sign = -1.0 if is_short else 1.0
 
     for bar_idx in range(n_bars):
+        # T+1 release: newly bought weights are frozen only within the same day.
+        if bar_idx == 0 or bar_day_index[bar_idx] != bar_day_index[bar_idx - 1]:
+            for i in range(held_count):
+                symbol_id = held_symbols[i]
+                frozen_weights[symbol_id] = 0.0
+
         current_row[:] = -1
         rank_by_symbol[:] = 0
         close_rank_by_symbol[:] = 0
@@ -226,14 +252,10 @@ def _simulate_portfolio_core_15min(
                 if debug_close_reason < 0:
                     debug_close_reason = 309
 
-            if not has_ranked_signal:
-                close_rank = 0
-                rank = 0
-            else:
+            if has_ranked_signal:
                 for pos in range(order_start, order_end):
                     signal_row_idx = sorted_rows[pos]
                     symbol_id = row_symbol_ids[signal_row_idx]
-                    exec_row_idx = current_row[symbol_id]
                     if debug_this_bar and symbol_id == debug_target_symbol_id:
                         target_seen_in_sorted = True
                         debug_has_signal_row = 1
@@ -252,7 +274,9 @@ def _simulate_portfolio_core_15min(
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_can_open_base = 1
 
-                    if signal_can_open_pool[symbol_id] or held[symbol_id]:
+                    # External eligible rank uses ideal entry holdings, not the
+                    # actual execution state.
+                    if signal_can_open_pool[symbol_id] or target[symbol_id]:
                         rank += 1
                         rank_by_symbol[symbol_id] = rank
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
@@ -260,77 +284,32 @@ def _simulate_portfolio_core_15min(
 
         n_closed = 0
         if has_signal and has_ranked_signal:
-            new_count = 0
-            for i in range(held_count):
-                symbol_id = held_symbols[i]
-                row_idx = current_row[symbol_id]
-                should_close = False
-                can_sell_today = entry_day_by_symbol[symbol_id] >= 0 and entry_day_by_symbol[symbol_id] < bar_day_index[bar_idx]
-                is_target_close = debug_this_bar and (symbol_id == debug_target_symbol_id)
-
-                if is_target_close:
-                    debug_target_held_before_close = 1
-                    if can_sell_today:
-                        debug_can_sell_today = 1
-                    if row_idx != -1 and can_close[row_idx]:
-                        debug_can_close_exec = 1
-                    if close_rank_by_symbol[symbol_id] > 0:
-                        debug_close_rank = close_rank_by_symbol[symbol_id]
-
-                if can_sell_today and row_idx != -1 and can_close[row_idx]:
-                    rank_rule = close_rank_by_symbol[symbol_id] == 0 or close_rank_by_symbol[symbol_id] > thresh_out
-                    size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
-
-                    if rank_rule:
-                        should_close = True
-                    if size_rule:
-                        should_close = True
-
-                    if is_target_close and should_close and debug_close_reason < 0:
-                        if rank_rule and size_rule:
-                            debug_close_reason = 307
-                        elif rank_rule:
-                            debug_close_reason = 305
-                        elif size_rule:
-                            debug_close_reason = 306
-                    elif is_target_close and not should_close and debug_close_reason < 0:
-                        debug_close_reason = 308
-                elif is_target_close and debug_close_reason < 0:
-                    if not can_sell_today:
-                        debug_close_reason = 302
-                    elif row_idx == -1:
-                        debug_close_reason = 303
-                    else:
-                        debug_close_reason = 304
-
-                if should_close:
-                    held[symbol_id] = False
-                    n_closed += 1
+            # 1) Ideal target layer: keep previous target names while they remain
+            # inside the exit buffer, then fill vacancies from current buyable
+            # signal names.
+            new_target_count = 0
+            for i in range(target_count):
+                symbol_id = target_symbols[i]
+                target_rank_rule = close_rank_by_symbol[symbol_id] == 0 or close_rank_by_symbol[symbol_id] > thresh_out
+                target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
+                if target_rank_rule or target_size_rule:
+                    target[symbol_id] = False
                 else:
-                    held_symbols[new_count] = symbol_id
-                    new_count += 1
-            held_count = new_count
+                    target_symbols[new_target_count] = symbol_id
+                    new_target_count += 1
+            target_count = new_target_count
 
-        if debug_this_bar and debug_close_reason < 0 and has_signal and has_ranked_signal:
-            if debug_target_held_before_close == 0:
-                debug_close_reason = 301
-
-        if has_signal and has_ranked_signal:
             for pos in range(order_start, order_end):
-                if held_count == port_size:
-                    if debug_this_bar and debug_reason < 0:
-                        debug_reason = 107
+                if target_count == port_size:
                     break
-
                 signal_row_idx = sorted_rows[pos]
                 symbol_id = row_symbol_ids[signal_row_idx]
                 exec_row_idx = current_row[symbol_id]
-                is_target = debug_this_bar and (symbol_id == debug_target_symbol_id)
-                if is_target:
+                if debug_this_bar and symbol_id == debug_target_symbol_id:
                     target_seen_in_open_loop = True
 
                 if bar_idx == first_execution_bar and strict_first_bar_top_n and rank_by_symbol[symbol_id] > port_size:
-                    if is_target and debug_reason < 0:
+                    if debug_this_bar and symbol_id == debug_target_symbol_id and debug_reason < 0:
                         debug_reason = 108
                     continue
 
@@ -338,53 +317,195 @@ def _simulate_portfolio_core_15min(
                     signal_can_open_pool[symbol_id]
                     and exec_row_idx != -1
                     and can_open[exec_row_idx]
-                    and not held[symbol_id]
+                    and not target[symbol_id]
                 ):
-                    held[symbol_id] = True
-                    entry_day_by_symbol[symbol_id] = bar_day_index[bar_idx]
-                    held_symbols[held_count] = symbol_id
-                    held_count += 1
-                    if is_target:
-                        debug_reason = 200
-                elif is_target and debug_reason < 0:
-                    if not signal_can_open_pool[symbol_id]:
-                        debug_reason = 103
-                    elif exec_row_idx == -1:
-                        debug_reason = 104
-                    elif not can_open[exec_row_idx]:
-                        debug_reason = 105
-                    elif held[symbol_id]:
-                        debug_reason = 106
+                    target[symbol_id] = True
+                    target_symbols[target_count] = symbol_id
+                    target_count += 1
+
+            target_weight = 0.0
+            if target_count > 0:
+                target_weight = 1.0 / target_count
+
+            if debug_this_bar:
+                symbol_id = debug_target_symbol_id
+                row_idx = current_row[symbol_id]
+                if current_weights[symbol_id] > eps:
+                    debug_target_held_before_close = 1
+                if row_idx != -1 and can_close[row_idx]:
+                    debug_can_close_exec = 1
+                if close_rank_by_symbol[symbol_id] > 0:
+                    debug_close_rank = close_rank_by_symbol[symbol_id]
+                sellable_dbg = current_weights[symbol_id] - frozen_weights[symbol_id]
+                if sellable_dbg > eps:
+                    debug_can_sell_today = 1
+
+            # 2) Actual sell layer: sell current > target by external priority:
+            # target_weight asc, reduction desc, stock_idx asc.
+            sell_count = 0
+            for i in range(held_count):
+                symbol_id = held_symbols[i]
+                cur_w = current_weights[symbol_id]
+                if cur_w <= eps:
+                    continue
+                tgt_w = target_weight if target[symbol_id] else 0.0
+                reduction = cur_w - tgt_w
+                if reduction > eps:
+                    target_group = 1.0 if target[symbol_id] else 0.0
+                    sell_candidates[sell_count] = symbol_id
+                    sell_keys[sell_count] = target_group * 10.0 - reduction + symbol_id * 1e-12
+                    sell_count += 1
+
+            if sell_count > 0:
+                sell_order = np.argsort(sell_keys[:sell_count])
+                remaining_sell_budget = 1.0
+                for oi in range(sell_count):
+                    if remaining_sell_budget <= eps:
+                        break
+                    symbol_id = sell_candidates[sell_order[oi]]
+                    cur_w = current_weights[symbol_id]
+                    tgt_w = target_weight if target[symbol_id] else 0.0
+                    reduction = cur_w - tgt_w
+                    if reduction <= eps:
+                        continue
+
+                    row_idx = current_row[symbol_id]
+                    if row_idx == -1 or not can_close[row_idx]:
+                        if debug_this_bar and symbol_id == debug_target_symbol_id and debug_close_reason < 0:
+                            debug_close_reason = 303 if row_idx == -1 else 304
+                        continue
+
+                    sellable = cur_w - frozen_weights[symbol_id]
+                    if sellable < 0.0:
+                        sellable = 0.0
+                    if sellable <= eps:
+                        if debug_this_bar and symbol_id == debug_target_symbol_id and debug_close_reason < 0:
+                            debug_close_reason = 302
+                        continue
+
+                    sell_w = reduction
+                    if sell_w > sellable:
+                        sell_w = sellable
+                    if sell_w > remaining_sell_budget:
+                        sell_w = remaining_sell_budget
+                    if sell_w <= eps:
+                        continue
+
+                    current_weights[symbol_id] = cur_w - sell_w
+                    cash_weight += sell_w
+                    remaining_sell_budget -= sell_w
+                    if current_weights[symbol_id] <= eps:
+                        current_weights[symbol_id] = 0.0
+                        frozen_weights[symbol_id] = 0.0
+                        held[symbol_id] = False
+                        n_closed += 1
+                    if debug_this_bar and symbol_id == debug_target_symbol_id and debug_close_reason < 0:
+                        debug_close_reason = 305
+
+            # Compact actual holdings after sells so newly opened names can append safely.
+            new_held_count = 0
+            for i in range(held_count):
+                symbol_id = held_symbols[i]
+                if current_weights[symbol_id] > eps:
+                    held_symbols[new_held_count] = symbol_id
+                    new_held_count += 1
+                else:
+                    held[symbol_id] = False
+            held_count = new_held_count
+
+            # 3) Actual buy layer: buy target deficits by deficit desc, first
+            # topping existing actual names, then opening new names.
+            buy_count = 0
+            for i in range(target_count):
+                symbol_id = target_symbols[i]
+                row_idx = current_row[symbol_id]
+                if row_idx == -1 or not can_open[row_idx]:
+                    continue
+                deficit = target_weight - current_weights[symbol_id]
+                if deficit > eps:
+                    buy_candidates[buy_count] = symbol_id
+                    buy_keys[buy_count] = -deficit + symbol_id * 1e-12
+                    buy_existing[buy_count] = current_weights[symbol_id] > eps
+                    buy_count += 1
+
+            if buy_count > 0 and cash_weight > eps:
+                buy_order = np.argsort(buy_keys[:buy_count])
+                for phase in range(2):
+                    if cash_weight <= eps:
+                        break
+                    for oi in range(buy_count):
+                        if cash_weight <= eps:
+                            break
+                        cand_idx = buy_order[oi]
+                        if phase == 0 and not buy_existing[cand_idx]:
+                            continue
+                        if phase == 1 and buy_existing[cand_idx]:
+                            continue
+
+                        symbol_id = buy_candidates[cand_idx]
+                        deficit = target_weight - current_weights[symbol_id]
+                        if deficit <= eps:
+                            continue
+                        buy_w = deficit
+                        if buy_w > cash_weight:
+                            buy_w = cash_weight
+                        if buy_w <= eps:
+                            continue
+
+                        was_held = current_weights[symbol_id] > eps
+                        current_weights[symbol_id] += buy_w
+                        cash_weight -= buy_w
+                        frozen_weights[symbol_id] += buy_w
+                        if not was_held:
+                            held[symbol_id] = True
+                            held_symbols[held_count] = symbol_id
+                            held_count += 1
+                        if debug_this_bar and symbol_id == debug_target_symbol_id:
+                            debug_reason = 200
+
+            if debug_this_bar and debug_close_reason < 0:
+                if current_weights[debug_target_symbol_id] <= eps:
+                    debug_close_reason = 301
+                elif target[debug_target_symbol_id]:
+                    debug_close_reason = 308
+                elif frozen_weights[debug_target_symbol_id] >= current_weights[debug_target_symbol_id] - eps:
+                    debug_close_reason = 302
+                else:
+                    debug_close_reason = 304
 
         if debug_this_bar and debug_reason < 0:
             if not has_signal:
                 debug_reason = 101
             elif not target_seen_in_sorted:
                 debug_reason = 102
-            elif not target_seen_in_open_loop and held_count == port_size:
+            elif not target_seen_in_open_loop and target_count == port_size:
                 debug_reason = 107
             elif debug_has_signal_row == 1 and (debug_in_size_pool == 0 or debug_can_open_base == 0):
                 debug_reason = 103
+            elif target[debug_target_symbol_id] and current_weights[debug_target_symbol_id] > eps:
+                debug_reason = 106
 
         close_counts[bar_idx] = n_closed
 
         bar_ret = 0.0
         curr_count = 0
-        if held_count > 0:
-            target_weight = portfolio_sign / held_count
-            for i in range(held_count):
-                symbol_id = held_symbols[i]
-                row_idx = current_row[symbol_id]
-                if row_idx == -1:
-                    continue
+        for i in range(held_count):
+            symbol_id = held_symbols[i]
+            actual_w = current_weights[symbol_id]
+            if actual_w <= eps:
+                continue
 
-                curr_weights[symbol_id] = target_weight
-                curr_symbols[curr_count] = symbol_id
-                curr_count += 1
+            signed_w = portfolio_sign * actual_w
+            curr_weights[symbol_id] = signed_w
+            curr_symbols[curr_count] = symbol_id
+            curr_count += 1
 
-                r = vwap_ret[row_idx]
-                if np.isfinite(r):
-                    bar_ret += target_weight * r
+            row_idx = current_row[symbol_id]
+            if row_idx == -1:
+                continue
+            r = vwap_ret[row_idx]
+            if np.isfinite(r):
+                bar_ret += signed_w * r
 
         touched_count = 0
         for i in range(prev_count):
@@ -434,6 +555,7 @@ def _simulate_portfolio_core_15min(
 
             rec_bar_idx[rec_count] = bar_idx
             rec_source_row[rec_count] = row_idx
+            rec_weight[rec_count] = current_weights[symbol_id]
             rec_size_rank[rec_count] = float(size_rank[row_idx])
             rec_vwap_ret[rec_count] = vwap_ret[row_idx]
             rec_tradable[rec_count] = tradable[row_idx]
@@ -446,6 +568,7 @@ def _simulate_portfolio_core_15min(
     return (
         rec_bar_idx[:rec_count],
         rec_source_row[:rec_count],
+        rec_weight[:rec_count],
         rec_pred_rank[:rec_count],
         rec_size_rank[:rec_count],
         rec_vwap_ret[:rec_count],
@@ -474,6 +597,7 @@ def _materialize_positions_15min(
     pool: BacktestDataset15Min,
     rec_bar_idx: np.ndarray,
     rec_source_row: np.ndarray,
+    rec_weight: np.ndarray,
     rec_pred_rank: np.ndarray,
     rec_size_rank: np.ndarray,
     rec_vwap_ret: np.ndarray,
@@ -486,6 +610,7 @@ def _materialize_positions_15min(
         "industry",
         "index",
         "ret",
+        "weight_actual",
         "is_limit_up",
         "is_limit_down",
         "listed_Satisfied",
@@ -501,17 +626,16 @@ def _materialize_positions_15min(
         empty = pd.DataFrame(columns=["date", "symbol", *columns])
         return empty.set_index(["date", "symbol"])
 
-    records = pl.DataFrame(
-        {
-            "row_idx": rec_source_row,
-            "snapshot_bar": pool.bars[rec_bar_idx],
-            "ret": rec_vwap_ret,
-            "size_rank": rec_size_rank,
-            "tradable": rec_tradable,
-            "pred_rank": rec_pred_rank,
-            "vwap_ret": rec_vwap_ret,
-        }
-    )
+    records = pl.DataFrame({
+        "row_idx": rec_source_row,
+        "snapshot_bar": pool.bars[rec_bar_idx],
+        "ret": rec_vwap_ret,
+        "weight_actual": rec_weight,
+        "size_rank": rec_size_rank,
+        "tradable": rec_tradable,
+        "pred_rank": rec_pred_rank,
+        "vwap_ret": rec_vwap_ret,
+    })
 
     base_columns = [
         "row_idx",
@@ -530,30 +654,30 @@ def _materialize_positions_15min(
     ]
 
     positions = (
-        records.join(pool.pool_frame.select(base_columns), on="row_idx", how="left")
+        records
+        .join(pool.pool_frame.select(base_columns), on="row_idx", how="left")
         .rename({"snapshot_bar": "date"})
-        .select(
-            [
-                "date",
-                "symbol",
-                "turnover",
-                "log_size",
-                "size_rank",
-                "industry",
-                "index",
-                "ret",
-                "is_limit_up",
-                "is_limit_down",
-                "listed_Satisfied",
-                "is_ST",
-                "normal_days",
-                "tradable",
-                "can_open",
-                "pred",
-                "pred_rank",
-                "vwap_ret",
-            ]
-        )
+        .select([
+            "date",
+            "symbol",
+            "turnover",
+            "log_size",
+            "size_rank",
+            "industry",
+            "index",
+            "ret",
+            "weight_actual",
+            "is_limit_up",
+            "is_limit_down",
+            "listed_Satisfied",
+            "is_ST",
+            "normal_days",
+            "tradable",
+            "can_open",
+            "pred",
+            "pred_rank",
+            "vwap_ret",
+        ])
     )
 
     result = positions.to_pandas()
@@ -591,13 +715,14 @@ def generate_portfolio_15min(
     (
         rec_bar_idx,
         rec_source_row,
+        rec_weight,
         rec_pred_rank,
         rec_size_rank,
         rec_vwap_ret,
         rec_tradable,
         close_counts_arr,
         turnover_arr,
-        port_ret_arr,
+        bar_returns_arr,
         held_counts_arr,
         debug_reason,
         debug_signal_bar_idx,
@@ -662,6 +787,7 @@ def generate_portfolio_15min(
         pool=pool,
         rec_bar_idx=rec_bar_idx,
         rec_source_row=rec_source_row,
+        rec_weight=rec_weight,
         rec_pred_rank=rec_pred_rank,
         rec_size_rank=rec_size_rank,
         rec_vwap_ret=rec_vwap_ret,
@@ -669,7 +795,7 @@ def generate_portfolio_15min(
     )
 
     close_counts = pd.DataFrame({"n_closed": close_counts_arr}, index=bars)
-    portfolio_returns = pd.Series(port_ret_arr, index=bars, name="portfolio_return")
+    portfolio_returns = pd.Series(bar_returns_arr, index=bars, name="portfolio_return")
     turnover = pd.Series(turnover_arr, index=bars, name="turnover")
     held_counts = pd.Series(held_counts_arr, index=bars, name="held_count")
 

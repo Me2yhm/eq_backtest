@@ -8,7 +8,7 @@ from pathlib import Path
 # ── Time range ────────────────────────────────────────────────────────────────
 START = "2019-01-02"
 # END = None  # e.g. "2026-01-01"; None means no cutoff
-END = "2019-01-03"
+END = "2026-01-01"
 
 
 # ── Data paths ────────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ OUTPUT_DIR = Path(f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}")
 
 # ── 15-minute backtest mode ───────────────────────────────────────────────────
 USE_15MIN = True
-DATA_15MIN_PATH = Path("/ext/eq_data/15min_bar_full_not_1500.parquet")
+DATA_15MIN_PATH = Path("/ext/eq_data/15min_bar_full_left.parquet")
 PREDS_15MIN_DIR = Path("/ext/trq")
 # HORIZONS_15MIN = ["3b", "5b", "10b"]
 HORIZONS_15MIN = ["predictions"]
