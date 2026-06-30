@@ -43,6 +43,7 @@ class BacktestDataset15Min:
     bars: np.ndarray
     symbols: np.ndarray
     bar_offsets: np.ndarray
+    bar_session_index: np.ndarray
     row_symbol_ids: np.ndarray
     vwap_ret: np.ndarray
     pred: np.ndarray
@@ -219,11 +220,19 @@ def _dataset_from_frame(pool: pl.DataFrame) -> BacktestDataset15Min:
     bar_offsets[0] = 0
     bar_offsets[1:] = np.cumsum(counts)
 
+    # Session index: 0=morning (bars before 12:00), 1=afternoon (bars >= 12:00).
+    # Mapped per bar, then factorized per (date, session) for T+1 freeze release.
+    bar_datetimes = pd.to_datetime(bars)
+    bar_session_half = (bar_datetimes.hour >= 12).astype(np.int32)
+    bar_date_session = bar_datetimes.normalize().astype("int64") // 10**9 * 10 + bar_session_half
+    bar_session_index = pd.factorize(bar_date_session)[0].astype(np.int32)
+
     return BacktestDataset15Min(
         pool_frame=encoded,
         bars=bars,
         symbols=np.asarray(symbol_values, dtype=object),
         bar_offsets=bar_offsets,
+        bar_session_index=bar_session_index,
         row_symbol_ids=encoded["symbol_id"].to_numpy().astype(np.int32, copy=False),
         vwap_ret=encoded["vwap_ret"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
         pred=encoded["pred"].fill_null(float("nan")).to_numpy().astype(np.float64, copy=False),

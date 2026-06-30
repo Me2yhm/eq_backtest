@@ -203,7 +203,8 @@ def _simulate_portfolio_core_15min(
     portfolio_sign = -1.0 if is_short else 1.0
 
     for bar_idx in range(n_bars):
-        # T+1 release: newly bought weights are frozen only within the same day.
+        # T+1 release: newly bought weights are frozen for the same day.
+        # Names bought today become sellable only on the next calendar day.
         if bar_idx == 0 or bar_day_index[bar_idx] != bar_day_index[bar_idx - 1]:
             for i in range(held_count):
                 symbol_id = held_symbols[i]
@@ -264,12 +265,13 @@ def _simulate_portfolio_core_15min(
                         close_rank += 1
                         close_rank_by_symbol[symbol_id] = close_rank
 
-                    if size_rank[signal_row_idx] < size_cut:
+                    in_size_pool = size_rank[signal_row_idx] < size_cut
+                    if in_size_pool:
                         signal_in_size_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_in_size_pool = 1
 
-                    if can_open_base[signal_row_idx]:
+                    if can_open_base[signal_row_idx] and in_size_pool:
                         signal_can_open_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_can_open_base = 1
@@ -290,9 +292,11 @@ def _simulate_portfolio_core_15min(
             new_target_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
-                target_rank_rule = close_rank_by_symbol[symbol_id] == 0 or close_rank_by_symbol[symbol_id] > thresh_out
+                exec_row_idx = current_row[symbol_id]
+                can_exit_target = exec_row_idx != -1 and can_close[exec_row_idx]
+                target_rank_rule = rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out
                 target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
-                if target_rank_rule or target_size_rule:
+                if (target_rank_rule or target_size_rule) and can_exit_target:
                     target[symbol_id] = False
                 else:
                     target_symbols[new_target_count] = symbol_id
@@ -334,8 +338,8 @@ def _simulate_portfolio_core_15min(
                     debug_target_held_before_close = 1
                 if row_idx != -1 and can_close[row_idx]:
                     debug_can_close_exec = 1
-                if close_rank_by_symbol[symbol_id] > 0:
-                    debug_close_rank = close_rank_by_symbol[symbol_id]
+                if rank_by_symbol[symbol_id] > 0:
+                    debug_close_rank = rank_by_symbol[symbol_id]
                 sellable_dbg = current_weights[symbol_id] - frozen_weights[symbol_id]
                 if sellable_dbg > eps:
                     debug_can_sell_today = 1
