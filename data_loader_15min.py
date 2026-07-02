@@ -296,5 +296,35 @@ def build_pool_15min(
         .sort(["datetime", "symbol"])
     )
 
+    # ── Align with external: filter *then* rank *then* take top-4400 ──────
+    # External filters (listed days / delisted / suspended / ST) BEFORE
+    # ranking by market cap.  Local previously ranked all stocks first,
+    # then applied can_open_base as a gate — which let untradeable stocks
+    # occupy top-4400 slots.
+    #
+    # Rank per *daily* (date, symbol) within can_open_base=True subset,
+    # then broadcast back to every 15-min bar so size_rank stays constant
+    # across intraday bars for the same symbol (same as external daily rank).
+    ranked_daily = (
+        pool
+        .select(["date", "symbol", "log_size", "can_open_base"])
+        .unique(subset=["date", "symbol"])
+        .with_columns(
+            pl
+            .when(pl.col("can_open_base"))
+            .then(pl.col("log_size").rank(descending=True).over("date"))
+            .otherwise(999999)
+            .cast(pl.Int32)
+            .alias("size_rank_new")
+        )
+        .select(["date", "symbol", "size_rank_new"])
+    )
+    pool = (
+        pool
+        .drop("size_rank")
+        .join(ranked_daily, on=["date", "symbol"], how="left")
+        .rename({"size_rank_new": "size_rank"})
+    )
+
     dataset = _dataset_from_frame(pool)
     return dataset, bm_ret
