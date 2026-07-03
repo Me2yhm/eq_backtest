@@ -173,12 +173,13 @@ def load_daily_flags(
     end: str | None,
     universe: list[str] | None,
     allow_st_open: bool,
+    listed_days_min: int,
 ) -> pl.DataFrame:
     """Load daily data and keep daily-level static constraints + limit prices."""
     start_date = date.fromisoformat(start)
     end_date = date.fromisoformat(end) if end else None
 
-    can_open_base_expr = pl.col("normal_days") >= 10
+    can_open_base_expr = pl.col("normal_days") >= listed_days_min
     # 新增：必须满足 listed_Satisfied == 1
     can_open_base_expr &= pl.col("listed_Satisfied").cast(pl.Boolean)
     if not allow_st_open:
@@ -255,6 +256,7 @@ def build_pool_15min(
     end: str | None,
     universe: list[str] | None,
     allow_st_open: bool,
+    listed_days_min: int,
 ) -> tuple[BacktestDataset15Min, pd.Series]:
     """
     Build 15-minute backtest dataset with daily constraint flags broadcast by (date, symbol).
@@ -267,7 +269,7 @@ def build_pool_15min(
     bm_ret = load_benchmark(bm_path)
 
     market_15m = load_15min_market(data_15min_path, start, end=end)
-    daily_flags = load_daily_flags(daily_data_path, start, end, universe, allow_st_open)
+    daily_flags = load_daily_flags(daily_data_path, start, end, universe, allow_st_open, listed_days_min)
     preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start, end=end)
 
     pool = (

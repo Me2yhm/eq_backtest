@@ -129,11 +129,14 @@ def _load_predictions_long_form(files: list[Path], start: str, end: str | None =
         filtered = wide.filter(pl.col(index_name) >= pl.lit(start_date))
         if end_date is not None:
             filtered = filtered.filter(pl.col(index_name) <= pl.lit(end_date))
-        long = filtered.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({index_name: "date"})
+        long = filtered.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({
+            index_name: "date"
+        })
         stacked.append(long)
 
     return (
-        pl.concat(stacked, how="vertical")
+        pl
+        .concat(stacked, how="vertical")
         .group_by(["date", "symbol"], maintain_order=True)
         .agg(pl.col("pred").mean().alias("pred"))
         .sort(["date", "symbol"])
@@ -225,6 +228,7 @@ def load_market_data(
     end: str | None,
     universe: list | None,
     allow_st_open: bool,
+    listed_days_min: int = 10,
 ) -> pl.DataFrame:
     """
     Load daily market data parquet and attach tradability flags.
@@ -242,7 +246,7 @@ def load_market_data(
     can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
     can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
     tradable_expr = can_trade_buy_expr & can_trade_sell_expr
-    can_open_base_expr = pl.col("normal_days") >= 10
+    can_open_base_expr = pl.col("normal_days") >= listed_days_min
     if not allow_st_open:
         can_open_base_expr &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
     if universe is not None:
@@ -361,6 +365,7 @@ def build_pool(
     allow_st_open: bool,
     use_cache: bool = True,
     cache_dir: Path | None = None,
+    listed_days_min: int = 10,
 ) -> tuple[BacktestDataset, pd.Series]:
     """
     Assemble the full pool and benchmark return series.
@@ -389,7 +394,7 @@ def build_pool(
     except PredictionAlignmentError:
         preds = _load_predictions_long_form(pred_files, start, end=end)
 
-    market = load_market_data(data_path, start, end, universe, allow_st_open)
+    market = load_market_data(data_path, start, end, universe, allow_st_open, listed_days_min)
     pool = market.join(preds, on=["date", "symbol"], how="left")
     dataset = _encode_dataset(pool)
 
