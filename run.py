@@ -172,7 +172,7 @@ def run() -> None:
             end=cfg.END,
             universe=cfg.UNIVERSE,
             allow_st_open=cfg.ALLOW_ST_OPEN,
-            listed_days_min=cfg.LISTED_DAYS_MIN,
+            nosuspend_days=cfg.NOSUSPEND_DAYS,
         )
     else:
         pool, bm_ret = build_pool(
@@ -186,7 +186,7 @@ def run() -> None:
             allow_st_open=cfg.ALLOW_ST_OPEN,
             use_cache=cfg.USE_POOL_CACHE,
             cache_dir=cfg.POOL_CACHE_DIR,
-            listed_days_min=cfg.LISTED_DAYS_MIN,
+            nosuspend_days=cfg.NOSUSPEND_DAYS,
         )
 
     # ── Run for each portfolio size ───────────────────────────────────────────

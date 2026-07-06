@@ -73,7 +73,9 @@ DEBUG_SYMBOL_15MIN = "300169.XSHE"
 DEBUG_DATETIME_15MIN = "2019-01-03 09:46:00"
 
 # ── Eligibility ─────────────────────────────────────────────────────────────────
-LISTED_DAYS_MIN = 10  # Minimum trading days to be eligible for opening (external: 20)
+NOSUSPEND_DAYS = (
+    10  # Consecutive days without suspension to be eligible for universe (external: _universe_nosuspend_days=10)
+)
 
 # ── Close on size drop ─────────────────────────────────────────────────────────
 CLOSE_ON_SIZE_DROP = False  # True: close positions when they drop out of size pool; False: keep holding as long as still valid_listed (matches external _drop_out_of_universe_immediate=false)

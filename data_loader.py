@@ -228,7 +228,7 @@ def load_market_data(
     end: str | None,
     universe: list | None,
     allow_st_open: bool,
-    listed_days_min: int = 10,
+    nosuspend_days: int = 10,
 ) -> pl.DataFrame:
     """
     Load daily market data parquet and attach tradability flags.
@@ -246,7 +246,7 @@ def load_market_data(
     can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
     can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
     tradable_expr = can_trade_buy_expr & can_trade_sell_expr
-    can_open_base_expr = pl.col("normal_days") >= listed_days_min
+    can_open_base_expr = pl.col("normal_days") >= nosuspend_days
     if not allow_st_open:
         can_open_base_expr &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
     if universe is not None:
@@ -365,7 +365,7 @@ def build_pool(
     allow_st_open: bool,
     use_cache: bool = True,
     cache_dir: Path | None = None,
-    listed_days_min: int = 10,
+    nosuspend_days: int = 10,
 ) -> tuple[BacktestDataset, pd.Series]:
     """
     Assemble the full pool and benchmark return series.
@@ -394,7 +394,7 @@ def build_pool(
     except PredictionAlignmentError:
         preds = _load_predictions_long_form(pred_files, start, end=end)
 
-    market = load_market_data(data_path, start, end, universe, allow_st_open, listed_days_min)
+    market = load_market_data(data_path, start, end, universe, allow_st_open, nosuspend_days)
     pool = market.join(preds, on=["date", "symbol"], how="left")
     dataset = _encode_dataset(pool)
 
