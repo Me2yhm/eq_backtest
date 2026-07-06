@@ -145,3 +145,6 @@ data_*/
 output_*
 
 *draft*
+
+tmp/
+*.db
