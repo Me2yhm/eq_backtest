@@ -177,6 +177,7 @@ def _simulate_portfolio_core_15min(
     # exceed ideal count intraday.
     record_capacity = n_bars * n_symbols
     rec_bar_idx = np.empty(record_capacity, dtype=np.int32)
+    rec_symbol_id = np.empty(record_capacity, dtype=np.int32)
     rec_source_row = np.empty(record_capacity, dtype=np.int64)
     rec_weight = np.empty(record_capacity, dtype=np.float64)
     rec_pred_rank = np.empty(record_capacity, dtype=np.float64)
@@ -544,23 +545,29 @@ def _simulate_portfolio_core_15min(
         for i in range(held_count):
             symbol_id = held_symbols[i]
             row_idx = current_row[symbol_id]
-            if row_idx == -1:
-                continue
-
             rec_bar_idx[rec_count] = bar_idx
-            rec_source_row[rec_count] = row_idx
+            rec_symbol_id[rec_count] = symbol_id
             rec_weight[rec_count] = current_weights[symbol_id]
-            rec_size_rank[rec_count] = float(size_rank[row_idx])
-            rec_vwap_ret[rec_count] = vwap_ret[row_idx]
-            rec_tradable[rec_count] = tradable[row_idx]
-            if tradable[row_idx] and rank_by_symbol[symbol_id] > 0:
-                rec_pred_rank[rec_count] = float(rank_by_symbol[symbol_id])
-            else:
+            if row_idx == -1:
+                rec_source_row[rec_count] = -1
+                rec_size_rank[rec_count] = np.nan
+                rec_vwap_ret[rec_count] = 0.0
+                rec_tradable[rec_count] = False
                 rec_pred_rank[rec_count] = np.nan
+            else:
+                rec_source_row[rec_count] = row_idx
+                rec_size_rank[rec_count] = float(size_rank[row_idx])
+                rec_vwap_ret[rec_count] = vwap_ret[row_idx]
+                rec_tradable[rec_count] = tradable[row_idx]
+                if tradable[row_idx] and rank_by_symbol[symbol_id] > 0:
+                    rec_pred_rank[rec_count] = float(rank_by_symbol[symbol_id])
+                else:
+                    rec_pred_rank[rec_count] = np.nan
             rec_count += 1
 
     return (
         rec_bar_idx[:rec_count],
+        rec_symbol_id[:rec_count],
         rec_source_row[:rec_count],
         rec_weight[:rec_count],
         rec_pred_rank[:rec_count],
@@ -590,6 +597,7 @@ def _simulate_portfolio_core_15min(
 def _materialize_positions_15min(
     pool: BacktestDataset15Min,
     rec_bar_idx: np.ndarray,
+    rec_symbol_id: np.ndarray,
     rec_source_row: np.ndarray,
     rec_weight: np.ndarray,
     rec_pred_rank: np.ndarray,
@@ -620,37 +628,63 @@ def _materialize_positions_15min(
         empty = pd.DataFrame(columns=["date", "symbol", *columns])
         return empty.set_index(["date", "symbol"])
 
-    records = pl.DataFrame({
-        "row_idx": rec_source_row,
-        "snapshot_bar": pool.bars[rec_bar_idx],
-        "ret": rec_vwap_ret,
-        "weight_actual": rec_weight,
-        "size_rank": rec_size_rank,
-        "tradable": rec_tradable,
-        "pred_rank": rec_pred_rank,
-        "vwap_ret": rec_vwap_ret,
-    })
+    snapshot_bars = pd.to_datetime(pool.bars[rec_bar_idx])
+    symbols = pool.symbols[rec_symbol_id]
+    records = (
+        pl.DataFrame({
+            "snapshot_bar": snapshot_bars,
+            "symbol": symbols,
+            "ret": rec_vwap_ret,
+            "weight_actual": rec_weight,
+            "size_rank_recorded": rec_size_rank,
+            "tradable": rec_tradable,
+            "pred_rank": rec_pred_rank,
+            "vwap_ret": rec_vwap_ret,
+        })
+        .with_columns(pl.col("snapshot_bar").dt.date().alias("snapshot_date"))
+    )
 
-    base_columns = [
-        "row_idx",
+    daily_columns = [
+        "date",
         "symbol",
-        "turnover",
         "log_size",
+        "size_rank",
         "industry",
         "index",
-        "is_limit_up",
-        "is_limit_down",
         "listed_Satisfied",
         "is_ST",
         "normal_days",
+    ]
+    current_bar_columns = [
+        "datetime",
+        "symbol",
+        "turnover",
+        "is_limit_up",
+        "is_limit_down",
         "can_open",
         "pred",
     ]
 
     positions = (
         records
-        .join(pool.pool_frame.select(base_columns), on="row_idx", how="left")
+        .join(
+            pool.daily_snapshot_frame.select(daily_columns).rename({"date": "snapshot_date", "size_rank": "size_rank_daily"}),
+            on=["snapshot_date", "symbol"],
+            how="left",
+        )
+        .join(
+            pool.pool_frame.select(current_bar_columns).rename({"datetime": "snapshot_bar"}),
+            on=["snapshot_bar", "symbol"],
+            how="left",
+        )
         .rename({"snapshot_bar": "date"})
+        .with_columns([
+            pl.coalesce("size_rank_daily", "size_rank_recorded").alias("size_rank"),
+            pl.col("turnover").fill_null(0.0),
+            pl.col("is_limit_up").fill_null(False),
+            pl.col("is_limit_down").fill_null(False),
+            pl.col("can_open").fill_null(False),
+        ])
         .select([
             "date",
             "symbol",
@@ -708,6 +742,7 @@ def generate_portfolio_15min(
 
     (
         rec_bar_idx,
+        rec_symbol_id,
         rec_source_row,
         rec_weight,
         rec_pred_rank,
@@ -780,6 +815,7 @@ def generate_portfolio_15min(
     positions = _materialize_positions_15min(
         pool=pool,
         rec_bar_idx=rec_bar_idx,
+        rec_symbol_id=rec_symbol_id,
         rec_source_row=rec_source_row,
         rec_weight=rec_weight,
         rec_pred_rank=rec_pred_rank,

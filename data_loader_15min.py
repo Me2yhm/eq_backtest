@@ -40,6 +40,7 @@ class BacktestDataset15Min:
     """Compact, array-backed 15-minute market and prediction data."""
 
     pool_frame: pl.DataFrame
+    daily_snapshot_frame: pl.DataFrame
     bars: np.ndarray
     symbols: np.ndarray
     bar_offsets: np.ndarray
@@ -208,7 +209,7 @@ def load_daily_flags(
     return frame
 
 
-def _dataset_from_frame(pool: pl.DataFrame) -> BacktestDataset15Min:
+def _dataset_from_frame(pool: pl.DataFrame, daily_snapshot_frame: pl.DataFrame) -> BacktestDataset15Min:
     symbol_values = pool["symbol"].unique().sort().to_list()
     symbol_map = pl.DataFrame({"symbol": symbol_values}).with_row_index("symbol_id")
     encoded = pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx")
@@ -230,6 +231,7 @@ def _dataset_from_frame(pool: pl.DataFrame) -> BacktestDataset15Min:
 
     return BacktestDataset15Min(
         pool_frame=encoded,
+        daily_snapshot_frame=daily_snapshot_frame,
         bars=bars,
         symbols=np.asarray(symbol_values, dtype=object),
         bar_offsets=bar_offsets,
@@ -271,10 +273,22 @@ def build_pool_15min(
     market_15m = load_15min_market(data_15min_path, start, end=end)
     daily_flags = load_daily_flags(daily_data_path, start, end, universe, allow_st_open, nosuspend_days)
     preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start, end=end)
+    ranked_daily = (
+        daily_flags
+        .drop("size_rank")
+        .with_columns(
+            pl
+            .when(pl.col("can_open_base"))
+            .then(pl.col("log_size").rank(descending=True).over("date"))
+            .otherwise(999999)
+            .cast(pl.Int32)
+            .alias("size_rank")
+        )
+    )
 
     pool = (
         market_15m
-        .join(daily_flags, on=["date", "symbol"], how="left")
+        .join(ranked_daily, on=["date", "symbol"], how="left")
         .join(preds_15m, on=["datetime", "symbol"], how="left")
         .with_columns(
             limit_up_hit=((pl.col("vwap15") - pl.col("limit_up_price")).abs() <= 0.0005).fill_null(False),
@@ -298,35 +312,5 @@ def build_pool_15min(
         .sort(["datetime", "symbol"])
     )
 
-    # ── Align with external: filter *then* rank *then* take top-4400 ──────
-    # External filters (listed days / delisted / suspended / ST) BEFORE
-    # ranking by market cap.  Local previously ranked all stocks first,
-    # then applied can_open_base as a gate — which let untradeable stocks
-    # occupy top-4400 slots.
-    #
-    # Rank per *daily* (date, symbol) within can_open_base=True subset,
-    # then broadcast back to every 15-min bar so size_rank stays constant
-    # across intraday bars for the same symbol (same as external daily rank).
-    ranked_daily = (
-        pool
-        .select(["date", "symbol", "log_size", "can_open_base"])
-        .unique(subset=["date", "symbol"])
-        .with_columns(
-            pl
-            .when(pl.col("can_open_base"))
-            .then(pl.col("log_size").rank(descending=True).over("date"))
-            .otherwise(999999)
-            .cast(pl.Int32)
-            .alias("size_rank_new")
-        )
-        .select(["date", "symbol", "size_rank_new"])
-    )
-    pool = (
-        pool
-        .drop("size_rank")
-        .join(ranked_daily, on=["date", "symbol"], how="left")
-        .rename({"size_rank_new": "size_rank"})
-    )
-
-    dataset = _dataset_from_frame(pool)
+    dataset = _dataset_from_frame(pool, ranked_daily)
     return dataset, bm_ret
