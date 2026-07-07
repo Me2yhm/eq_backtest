@@ -57,7 +57,7 @@ OUTPUT_DIR = Path(f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}")
 
 # ── 15-minute backtest mode ───────────────────────────────────────────────────
 USE_15MIN = True
-DATA_15MIN_PATH = Path("/ext/eq_data/15min_bar_full_left.parquet")
+DATA_15MIN_PATH = Path("/ext/eq_data/15min_bar_full_left_close.parquet")
 PREDS_15MIN_DIR = Path("/ext/trq")
 # HORIZONS_15MIN = ["3b", "5b", "10b"]
 HORIZONS_15MIN = ["predictions"]
