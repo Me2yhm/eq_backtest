@@ -273,16 +273,32 @@ def build_pool_15min(
     market_15m = load_15min_market(data_15min_path, start, end=end)
     daily_flags = load_daily_flags(daily_data_path, start, end, universe, allow_st_open, nosuspend_days)
     preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start, end=end)
+    # Size-pool ranking only uses the daily base universe definition:
+    # normal_days / listed_Satisfied / non-ST (+ optional index universe).
+    # Intraday tradability such as turnover or limit hits must not affect rank.
+    rank_pool_expr = (
+        (pl.col("normal_days") >= nosuspend_days)
+        & pl.col("listed_Satisfied").cast(pl.Boolean)
+        & ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
+    )
+    if universe is not None:
+        rank_pool_expr &= pl.col("index").is_in(universe)
+
+    eligible_ranked_daily = (
+        daily_flags
+        .filter(rank_pool_expr)
+        .select(["date", "symbol", "log_size"])
+        .with_columns(
+            pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank")
+        )
+        .select(["date", "symbol", "size_rank"])
+    )
     ranked_daily = (
         daily_flags
         .drop("size_rank")
+        .join(eligible_ranked_daily, on=["date", "symbol"], how="left")
         .with_columns(
-            pl
-            .when(pl.col("can_open_base"))
-            .then(pl.col("log_size").rank(descending=True).over("date"))
-            .otherwise(999999)
-            .cast(pl.Int32)
-            .alias("size_rank")
+            pl.col("size_rank").fill_null(999999).cast(pl.Int32)
         )
     )
 

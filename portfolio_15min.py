@@ -132,7 +132,6 @@ def _simulate_portfolio_core_15min(
     debug_target_bar_idx: int,
 ) -> tuple:
     n_bars = len(bar_offsets) - 1
-    first_execution_bar = 1 if trade_on_next_bar else 0
     eps = 1e-12
 
     # target: ideal/rank-band layer. held: actual layer presence mirror.
@@ -145,8 +144,6 @@ def _simulate_portfolio_core_15min(
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
-    signal_can_open_pool = np.zeros(n_symbols, dtype=np.bool_)
-
     # Actual holdings can temporarily exceed port_size because T+1 frozen names
     # may coexist with newly opened target names.
     held_symbols = np.full(n_symbols, -1, dtype=np.int32)
@@ -213,7 +210,6 @@ def _simulate_portfolio_core_15min(
         current_row[:] = -1
         rank_by_symbol[:] = 0
         signal_in_size_pool[:] = False
-        signal_can_open_pool[:] = False
 
         bar_start = bar_offsets[bar_idx]
         bar_end = bar_offsets[bar_idx + 1]
@@ -262,14 +258,13 @@ def _simulate_portfolio_core_15min(
                     in_size_pool = size_rank[signal_row_idx] < size_cut
                     if in_size_pool:
                         signal_in_size_pool[symbol_id] = True
-                        signal_can_open_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_can_open_base = 1
                             debug_in_size_pool = 1
 
                     # External eligible rank uses ideal entry holdings, not the
                     # actual execution state.
-                    if signal_can_open_pool[symbol_id] or target[symbol_id]:
+                    if signal_in_size_pool[symbol_id] or target[symbol_id]:
                         rank += 1
                         rank_by_symbol[symbol_id] = rank
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
@@ -278,8 +273,9 @@ def _simulate_portfolio_core_15min(
         n_closed = 0
         if has_signal and has_ranked_signal:
             # 1) Ideal target layer: keep previous target names while they remain
-            # inside the exit buffer, then fill vacancies from current buyable
-            # signal names.
+            # inside the exit buffer, then only consider current signal names
+            # inside the top-N rank frontier. If some names inside that frontier
+            # are not executable, we do not backfill with lower-ranked names.
             new_target_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
@@ -300,16 +296,17 @@ def _simulate_portfolio_core_15min(
                 signal_row_idx = sorted_rows[pos]
                 symbol_id = row_symbol_ids[signal_row_idx]
                 exec_row_idx = current_row[symbol_id]
+                signal_rank = rank_by_symbol[symbol_id]
                 if debug_this_bar and symbol_id == debug_target_symbol_id:
                     target_seen_in_open_loop = True
 
-                if bar_idx == first_execution_bar and strict_first_bar_top_n and rank_by_symbol[symbol_id] > port_size:
-                    if debug_this_bar and symbol_id == debug_target_symbol_id and debug_reason < 0:
-                        debug_reason = 108
+                if signal_rank == 0:
                     continue
+                if signal_rank > port_size:
+                    break
 
                 if (
-                    signal_can_open_pool[symbol_id]
+                    signal_in_size_pool[symbol_id]
                     and exec_row_idx != -1
                     and can_open[exec_row_idx]
                     and not target[symbol_id]
