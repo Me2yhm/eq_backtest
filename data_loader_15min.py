@@ -47,6 +47,9 @@ class BacktestDataset15Min:
     bar_session_index: np.ndarray
     row_symbol_ids: np.ndarray
     vwap_ret: np.ndarray
+    close_prev: np.ndarray  # ≈ open_t = close_{t-1} (连续竞价)
+    close_curr: np.ndarray  # ≈ open_{t+1} = close_t
+    vwap15: np.ndarray
     pred: np.ndarray
     size_rank: np.ndarray
     tradable: np.ndarray
@@ -83,11 +86,11 @@ def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.Data
     frame = pl.read_parquet(path)
     frame = _normalize_symbol_column(frame)
 
-    required = {"datetime", "vwap_ret", "vwap15", "turnover"}
+    required = {"datetime", "close", "vwap15", "turnover", "open", "vwap_ret"}
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise ValueError(
-            f"15m market parquet must contain columns: symbol, datetime, vwap_ret, vwap15, turnover. Missing: {missing}"
+            f"15m market parquet must contain: close, vwap15, turnover, open, vwap_ret. Missing: {missing}"
         )
 
     if frame["datetime"].dtype == pl.String:
@@ -102,7 +105,10 @@ def load_15min_market(path: Path, start: str, end: str | None = None) -> pl.Data
     if end_date is not None:
         out = out.filter(pl.col("date") <= pl.lit(end_date))
 
-    return out.select(["datetime", "date", "symbol", "vwap_ret", "vwap15", "turnover"]).sort(["datetime", "symbol"])
+    return out.select(["datetime", "date", "symbol", "vwap_ret", "vwap15", "open", "close", "turnover"]).sort([
+        "datetime",
+        "symbol",
+    ])
 
 
 def _normalize_prediction_frame(frame: pl.DataFrame) -> pl.DataFrame:
@@ -229,6 +235,18 @@ def _dataset_from_frame(pool: pl.DataFrame, daily_snapshot_frame: pl.DataFrame) 
     bar_date_session = bar_datetimes.normalize().astype("int64") // 10**9 * 10 + bar_session_half
     bar_session_index = pd.factorize(bar_date_session)[0].astype(np.int32)
 
+    # Compute close_prev and close_curr from actual close prices
+    # close_prev = close of previous bar (shift +1 within each symbol)
+    # close_curr = close of current bar
+    encoded = encoded.sort(["symbol", "datetime"]).with_columns([
+        pl.col("close").shift(1).over("symbol").alias("close_prev"),
+        pl.col("close").alias("close_curr"),
+    ])
+    # Fill null close_prev (first bar per symbol) with open as fallback
+    encoded = encoded.with_columns(pl.col("close_prev").fill_null(pl.col("open")))
+    # Re-sort to original order (by datetime, symbol)
+    encoded = encoded.sort(["datetime", "symbol"])
+
     return BacktestDataset15Min(
         pool_frame=encoded,
         daily_snapshot_frame=daily_snapshot_frame,
@@ -238,6 +256,9 @@ def _dataset_from_frame(pool: pl.DataFrame, daily_snapshot_frame: pl.DataFrame) 
         bar_session_index=bar_session_index,
         row_symbol_ids=encoded["symbol_id"].to_numpy().astype(np.int32, copy=False),
         vwap_ret=encoded["vwap_ret"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        close_prev=encoded["close_prev"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        close_curr=encoded["close_curr"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        vwap15=encoded["vwap15"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
         pred=encoded["pred"].fill_null(float("nan")).to_numpy().astype(np.float64, copy=False),
         size_rank=encoded["size_rank"].fill_null(999999).to_numpy().astype(np.int32, copy=False),
         tradable=encoded["tradable"].fill_null(False).to_numpy().astype(np.bool_, copy=False),

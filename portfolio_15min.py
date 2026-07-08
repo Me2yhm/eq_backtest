@@ -115,6 +115,9 @@ def _simulate_portfolio_core_15min(
     sorted_offsets: np.ndarray,
     row_symbol_ids: np.ndarray,
     vwap_ret: np.ndarray,
+    close_prev: np.ndarray,
+    close_curr: np.ndarray,
+    vwap15: np.ndarray,
     pred: np.ndarray,
     size_rank: np.ndarray,
     tradable: np.ndarray,
@@ -500,6 +503,9 @@ def _simulate_portfolio_core_15min(
 
         close_counts[bar_idx] = n_closed
 
+        # ── Bar return: close→vwap15→close 两段分解（对标外部 state machine）──
+        # seg1 = prev_weight × (vwap15 - close_prev) / close_prev   (old position earns close→vwap)
+        # seg2 = curr_weight × (close_curr - vwap15) / vwap15  (new position earns vwap→close)
         bar_ret = 0.0
         curr_count = 0
         for i in range(held_count):
@@ -516,9 +522,44 @@ def _simulate_portfolio_core_15min(
             row_idx = current_row[symbol_id]
             if row_idx == -1:
                 continue
-            r = vwap_ret[row_idx]
-            if np.isfinite(r):
-                bar_ret += signed_w * r
+
+            pw = prev_weights[symbol_id]
+            cw = actual_w
+            cp = close_prev[row_idx]
+            v = vwap15[row_idx]
+            cc = close_curr[row_idx]
+
+            seg1 = 0.0
+            seg2 = 0.0
+            if pw > eps and cp > 0:
+                r1 = (v - cp) / cp
+                if abs(r1) <= 0.21:
+                    seg1 = pw * r1
+            if cw > eps and v > 0:
+                r2 = (cc - v) / v
+                if abs(r2) <= 0.21:
+                    seg2 = cw * r2
+
+            bar_ret += portfolio_sign * (seg1 + seg2)
+
+        # 清仓股票：只有 seg1（旧仓位赚 close→vwap，新仓位=0 无 seg2）
+        for i in range(prev_count):
+            symbol_id = prev_symbols[i]
+            pw = prev_weights[symbol_id]
+            if pw <= eps:
+                continue
+            cw = current_weights[symbol_id]
+            if cw > eps:
+                continue
+            row_idx = current_row[symbol_id]
+            if row_idx == -1:
+                continue
+            cp = close_prev[row_idx]
+            v = vwap15[row_idx]
+            if pw > eps and cp > 0:
+                r1 = (v - cp) / cp
+                if abs(r1) <= 0.21:
+                    bar_ret += portfolio_sign * pw * r1
 
         touched_count = 0
         for i in range(prev_count):
@@ -828,6 +869,9 @@ def generate_portfolio_15min(
         sorted_offsets=sorted_offsets,
         row_symbol_ids=pool.row_symbol_ids,
         vwap_ret=pool.vwap_ret,
+        close_prev=pool.close_prev,
+        close_curr=pool.close_curr,
+        vwap15=pool.vwap15,
         pred=pool.pred,
         size_rank=pool.size_rank,
         tradable=pool.tradable,
