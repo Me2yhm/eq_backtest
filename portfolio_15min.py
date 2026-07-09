@@ -206,6 +206,7 @@ def _simulate_portfolio_core_15min(
     debug_close_rank = 0
 
     portfolio_sign = -1.0 if is_short else 1.0
+    nominal_weight = 1.0 / port_size
 
     for bar_idx in range(n_bars):
         # T+1 release: newly bought weights are frozen for the same day.
@@ -325,7 +326,7 @@ def _simulate_portfolio_core_15min(
 
             target_weight = 0.0
             if target_count > 0:
-                target_weight = 1.0 / target_count
+                target_weight = nominal_weight
 
             if debug_this_bar:
                 symbol_id = debug_target_symbol_id
