@@ -285,14 +285,21 @@ def _simulate_portfolio_core_15min(
             # inside the exit buffer, then only consider current signal names
             # inside the top-N rank frontier. If some names inside that frontier
             # are not executable, we do not backfill with lower-ranked names.
+            # Ideal target should ignore one-sided price-limit execution blocks
+            # (buy-limit / sell-limit), but still exclude names that are not
+            # valid listed tradables on the bar, such as suspensions.
             new_target_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
                 exec_row_idx = current_row[symbol_id]
-                can_exit_target = exec_row_idx != -1 and can_close[exec_row_idx]
+                target_valid_listed = (
+                    exec_row_idx != -1
+                    and can_open_base[exec_row_idx]
+                    and (can_open[exec_row_idx] or can_close[exec_row_idx])
+                )
                 target_rank_rule = rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out
                 target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
-                if (target_rank_rule or target_size_rule) and can_exit_target:
+                if target_rank_rule or target_size_rule or not target_valid_listed:
                     target[symbol_id] = False
                 else:
                     target_symbols[new_target_count] = symbol_id
@@ -314,10 +321,15 @@ def _simulate_portfolio_core_15min(
                 if signal_rank > port_size:
                     break
 
+                target_can_enter = (
+                    exec_row_idx != -1
+                    and can_open_base[exec_row_idx]
+                    and (can_open[exec_row_idx] or can_close[exec_row_idx])
+                )
+
                 if (
                     signal_in_size_pool[symbol_id]
-                    and exec_row_idx != -1
-                    and can_open[exec_row_idx]
+                    and target_can_enter
                     and not target[symbol_id]
                 ):
                     target[symbol_id] = True
