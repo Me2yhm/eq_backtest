@@ -324,9 +324,10 @@ def _simulate_portfolio_core_15min(
             # inside the exit buffer, then only consider current signal names
             # inside the top-N rank frontier. If some names inside that frontier
             # are not executable, we do not backfill with lower-ranked names.
-            # Ideal target should ignore one-sided price-limit execution blocks
-            # (buy-limit / sell-limit), but still exclude names that are not
-            # valid listed tradables on the bar, such as suspensions.
+            # Ideal target should ignore intraday execution blocks such as
+            # zero-turnover or one-sided price-limit states. It only requires
+            # the name to be present on the bar and pass the daily base
+            # universe checks.
             new_target_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
@@ -334,7 +335,6 @@ def _simulate_portfolio_core_15min(
                 target_valid_listed = (
                     exec_row_idx != -1
                     and can_open_base[exec_row_idx]
-                    and (can_open[exec_row_idx] or can_close[exec_row_idx])
                 )
                 target_rank_rule = rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out
                 target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
@@ -363,7 +363,6 @@ def _simulate_portfolio_core_15min(
                 target_can_enter = (
                     exec_row_idx != -1
                     and can_open_base[exec_row_idx]
-                    and (can_open[exec_row_idx] or can_close[exec_row_idx])
                 )
 
                 # External buy_candidates restricts rank_pos <= port_size;
