@@ -27,7 +27,6 @@ class PortfolioResult15Min:
     cost_turnover: pd.Series
     turnover: pd.Series
     held_counts: pd.Series
-    target_weights: pd.DataFrame | None = None
 
 
 def _build_bar_orders(pool: BacktestDataset15Min, ascending: bool) -> tuple[np.ndarray, np.ndarray]:
@@ -132,11 +131,11 @@ def _simulate_portfolio_core_15min(
     strict_first_bar_top_n: bool,
     trade_on_next_bar: bool,
     is_short: bool,
-    record_target: bool,
     debug_target_symbol_id: int,
     debug_target_bar_idx: int,
 ) -> tuple:
     n_bars = len(bar_offsets) - 1
+    first_execution_bar = 1 if trade_on_next_bar else 0
     eps = 1e-12
 
     # target: ideal/rank-band layer. held: actual layer presence mirror.
@@ -149,6 +148,8 @@ def _simulate_portfolio_core_15min(
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
+    signal_can_open_pool = np.zeros(n_symbols, dtype=np.bool_)
+
     # Actual holdings can temporarily exceed port_size because T+1 frozen names
     # may coexist with newly opened target names.
     held_symbols = np.full(n_symbols, -1, dtype=np.int32)
@@ -179,7 +180,6 @@ def _simulate_portfolio_core_15min(
     # exceed ideal count intraday.
     record_capacity = n_bars * n_symbols
     rec_bar_idx = np.empty(record_capacity, dtype=np.int32)
-    rec_symbol_id = np.empty(record_capacity, dtype=np.int32)
     rec_source_row = np.empty(record_capacity, dtype=np.int64)
     rec_weight = np.empty(record_capacity, dtype=np.float64)
     rec_pred_rank = np.empty(record_capacity, dtype=np.float64)
@@ -187,12 +187,6 @@ def _simulate_portfolio_core_15min(
     rec_vwap_ret = np.empty(record_capacity, dtype=np.float64)
     rec_tradable = np.empty(record_capacity, dtype=np.bool_)
     rec_count = 0
-
-    target_record_capacity = n_bars * port_size if record_target else 0
-    target_rec_bar_idx = np.empty(target_record_capacity, dtype=np.int32)
-    target_rec_symbol_id = np.empty(target_record_capacity, dtype=np.int32)
-    target_rec_weight = np.empty(target_record_capacity, dtype=np.float64)
-    target_rec_count = 0
 
     debug_reason = -1
     debug_signal_bar_idx = -1
@@ -209,7 +203,6 @@ def _simulate_portfolio_core_15min(
     debug_close_rank = 0
 
     portfolio_sign = -1.0 if is_short else 1.0
-    nominal_weight = 1.0 / port_size
 
     for bar_idx in range(n_bars):
         # T+1 release: newly bought weights are frozen for the same day.
@@ -222,6 +215,7 @@ def _simulate_portfolio_core_15min(
         current_row[:] = -1
         rank_by_symbol[:] = 0
         signal_in_size_pool[:] = False
+        signal_can_open_pool[:] = False
 
         bar_start = bar_offsets[bar_idx]
         bar_end = bar_offsets[bar_idx + 1]
@@ -270,13 +264,14 @@ def _simulate_portfolio_core_15min(
                     in_size_pool = size_rank[signal_row_idx] < size_cut
                     if in_size_pool:
                         signal_in_size_pool[symbol_id] = True
+                        signal_can_open_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_can_open_base = 1
                             debug_in_size_pool = 1
 
                     # External eligible rank uses ideal entry holdings, not the
                     # actual execution state.
-                    if signal_in_size_pool[symbol_id] or target[symbol_id]:
+                    if signal_can_open_pool[symbol_id] or target[symbol_id]:
                         rank += 1
                         rank_by_symbol[symbol_id] = rank
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
@@ -285,24 +280,23 @@ def _simulate_portfolio_core_15min(
         n_closed = 0
         if has_signal and has_ranked_signal:
             # 1) Ideal target layer: keep previous target names while they remain
-            # inside the exit buffer, then only consider current signal names
-            # inside the top-N rank frontier. If some names inside that frontier
-            # are not executable, we do not backfill with lower-ranked names.
-            # Ideal target should ignore one-sided price-limit execution blocks
-            # (buy-limit / sell-limit), but still exclude names that are not
-            # valid listed tradables on the bar, such as suspensions.
+            # inside the exit buffer, then fill vacancies from current buyable
+            # signal names.
             new_target_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
                 exec_row_idx = current_row[symbol_id]
-                target_valid_listed = (
-                    exec_row_idx != -1
-                    and can_open_base[exec_row_idx]
-                    and (can_open[exec_row_idx] or can_close[exec_row_idx])
-                )
+                can_exit_target = exec_row_idx != -1 and can_close[exec_row_idx]
                 target_rank_rule = rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out
                 target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
-                if target_rank_rule or target_size_rule or not target_valid_listed:
+                # External removes stocks from target when they leave eligible
+                # (not in universe / not _valid_listed), regardless of
+                # tradability.  When a stock is absent from the current bar
+                # (exec_row_idx == -1) it has left the local universe, so drop
+                # it from target even if can_exit_target is False.
+                if exec_row_idx == -1 and target_rank_rule:
+                    target[symbol_id] = False
+                elif (target_rank_rule or target_size_rule) and can_exit_target:
                     target[symbol_id] = False
                 else:
                     target_symbols[new_target_count] = symbol_id
@@ -315,24 +309,23 @@ def _simulate_portfolio_core_15min(
                 signal_row_idx = sorted_rows[pos]
                 symbol_id = row_symbol_ids[signal_row_idx]
                 exec_row_idx = current_row[symbol_id]
-                signal_rank = rank_by_symbol[symbol_id]
                 if debug_this_bar and symbol_id == debug_target_symbol_id:
                     target_seen_in_open_loop = True
 
-                if signal_rank == 0:
+                if bar_idx == first_execution_bar and strict_first_bar_top_n and rank_by_symbol[symbol_id] > port_size:
+                    if debug_this_bar and symbol_id == debug_target_symbol_id and debug_reason < 0:
+                        debug_reason = 108
                     continue
-                if signal_rank > port_size:
-                    break
 
-                target_can_enter = (
-                    exec_row_idx != -1
-                    and can_open_base[exec_row_idx]
-                    and (can_open[exec_row_idx] or can_close[exec_row_idx])
-                )
+                # External buy_candidates restricts rank_pos <= port_size;
+                # never fill slots from rank > port_size.
+                if rank_by_symbol[symbol_id] > port_size:
+                    continue
 
                 if (
-                    signal_in_size_pool[symbol_id]
-                    and target_can_enter
+                    signal_can_open_pool[symbol_id]
+                    and exec_row_idx != -1
+                    and can_open[exec_row_idx]
                     and not target[symbol_id]
                 ):
                     target[symbol_id] = True
@@ -341,7 +334,12 @@ def _simulate_portfolio_core_15min(
 
             target_weight = 0.0
             if target_count > 0:
-                target_weight = nominal_weight
+                # External uses port_size as the weight denominator, not
+                # target_count.  When some target slots are unfilled (e.g.
+                # limit-up stocks can't be bought), external still divides by
+                # port_size so that cash_weight = 1 - n_held/port_size > 0,
+                # allowing subsequent bars to buy new names with residual cash.
+                target_weight = 1.0 / port_size
 
             if debug_this_bar:
                 symbol_id = debug_target_symbol_id
@@ -431,6 +429,8 @@ def _simulate_portfolio_core_15min(
 
             # 3) Actual buy layer: buy target deficits by deficit desc, first
             # topping existing actual names, then opening new names.
+            # External (actual.md L107-140) confirms two-phase: existing first,
+            # then new.  Sort key is (deficit desc, stock_idx asc).
             buy_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
@@ -600,53 +600,33 @@ def _simulate_portfolio_core_15min(
 
         prev_count = next_prev_count
         held_counts[bar_idx] = held_count
-        current_target_weight = 0.0
-        if target_count > 0:
-            current_target_weight = nominal_weight
 
         for i in range(held_count):
             symbol_id = held_symbols[i]
             row_idx = current_row[symbol_id]
-            rec_bar_idx[rec_count] = bar_idx
-            rec_symbol_id[rec_count] = symbol_id
-            rec_weight[rec_count] = current_weights[symbol_id]
             if row_idx == -1:
-                rec_source_row[rec_count] = -1
-                rec_size_rank[rec_count] = np.nan
-                rec_vwap_ret[rec_count] = 0.0
-                rec_tradable[rec_count] = False
-                rec_pred_rank[rec_count] = np.nan
-            else:
-                rec_source_row[rec_count] = row_idx
-                rec_size_rank[rec_count] = float(size_rank[row_idx])
-                rec_vwap_ret[rec_count] = vwap_ret[row_idx]
-                rec_tradable[rec_count] = tradable[row_idx]
-                if tradable[row_idx] and rank_by_symbol[symbol_id] > 0:
-                    rec_pred_rank[rec_count] = float(rank_by_symbol[symbol_id])
-                else:
-                    rec_pred_rank[rec_count] = np.nan
-            rec_count += 1
+                continue
 
-        if record_target:
-            for i in range(target_count):
-                symbol_id = target_symbols[i]
-                target_rec_bar_idx[target_rec_count] = bar_idx
-                target_rec_symbol_id[target_rec_count] = symbol_id
-                target_rec_weight[target_rec_count] = current_target_weight
-                target_rec_count += 1
+            rec_bar_idx[rec_count] = bar_idx
+            rec_source_row[rec_count] = row_idx
+            rec_weight[rec_count] = current_weights[symbol_id]
+            rec_size_rank[rec_count] = float(size_rank[row_idx])
+            rec_vwap_ret[rec_count] = vwap_ret[row_idx]
+            rec_tradable[rec_count] = tradable[row_idx]
+            if tradable[row_idx] and rank_by_symbol[symbol_id] > 0:
+                rec_pred_rank[rec_count] = float(rank_by_symbol[symbol_id])
+            else:
+                rec_pred_rank[rec_count] = np.nan
+            rec_count += 1
 
     return (
         rec_bar_idx[:rec_count],
-        rec_symbol_id[:rec_count],
         rec_source_row[:rec_count],
         rec_weight[:rec_count],
         rec_pred_rank[:rec_count],
         rec_size_rank[:rec_count],
         rec_vwap_ret[:rec_count],
         rec_tradable[:rec_count],
-        target_rec_bar_idx[:target_rec_count],
-        target_rec_symbol_id[:target_rec_count],
-        target_rec_weight[:target_rec_count],
         close_counts,
         bar_turnover,
         bar_returns,
@@ -670,7 +650,6 @@ def _simulate_portfolio_core_15min(
 def _materialize_positions_15min(
     pool: BacktestDataset15Min,
     rec_bar_idx: np.ndarray,
-    rec_symbol_id: np.ndarray,
     rec_source_row: np.ndarray,
     rec_weight: np.ndarray,
     rec_pred_rank: np.ndarray,
@@ -701,63 +680,37 @@ def _materialize_positions_15min(
         empty = pd.DataFrame(columns=["date", "symbol", *columns])
         return empty.set_index(["date", "symbol"])
 
-    snapshot_bars = pd.to_datetime(pool.bars[rec_bar_idx])
-    symbols = pool.symbols[rec_symbol_id]
-    records = (
-        pl.DataFrame({
-            "snapshot_bar": snapshot_bars,
-            "symbol": symbols,
-            "ret": rec_vwap_ret,
-            "weight_actual": rec_weight,
-            "size_rank_recorded": rec_size_rank,
-            "tradable": rec_tradable,
-            "pred_rank": rec_pred_rank,
-            "vwap_ret": rec_vwap_ret,
-        })
-        .with_columns(pl.col("snapshot_bar").dt.date().alias("snapshot_date"))
-    )
+    records = pl.DataFrame({
+        "row_idx": rec_source_row,
+        "snapshot_bar": pool.bars[rec_bar_idx],
+        "ret": rec_vwap_ret,
+        "weight_actual": rec_weight,
+        "size_rank": rec_size_rank,
+        "tradable": rec_tradable,
+        "pred_rank": rec_pred_rank,
+        "vwap_ret": rec_vwap_ret,
+    })
 
-    daily_columns = [
-        "date",
+    base_columns = [
+        "row_idx",
         "symbol",
+        "turnover",
         "log_size",
-        "size_rank",
         "industry",
         "index",
+        "is_limit_up",
+        "is_limit_down",
         "listed_Satisfied",
         "is_ST",
         "normal_days",
-    ]
-    current_bar_columns = [
-        "datetime",
-        "symbol",
-        "turnover",
-        "is_limit_up",
-        "is_limit_down",
         "can_open",
         "pred",
     ]
 
     positions = (
         records
-        .join(
-            pool.daily_snapshot_frame.select(daily_columns).rename({"date": "snapshot_date", "size_rank": "size_rank_daily"}),
-            on=["snapshot_date", "symbol"],
-            how="left",
-        )
-        .join(
-            pool.pool_frame.select(current_bar_columns).rename({"datetime": "snapshot_bar"}),
-            on=["snapshot_bar", "symbol"],
-            how="left",
-        )
+        .join(pool.pool_frame.select(base_columns), on="row_idx", how="left")
         .rename({"snapshot_bar": "date"})
-        .with_columns([
-            pl.coalesce("size_rank_daily", "size_rank_recorded").alias("size_rank"),
-            pl.col("turnover").fill_null(0.0),
-            pl.col("is_limit_up").fill_null(False),
-            pl.col("is_limit_down").fill_null(False),
-            pl.col("can_open").fill_null(False),
-        ])
         .select([
             "date",
             "symbol",
@@ -786,25 +739,6 @@ def _materialize_positions_15min(
     return result.set_index(["date", "symbol"]).sort_index()
 
 
-def _materialize_weight_snapshots_15min(
-    pool: BacktestDataset15Min,
-    rec_bar_idx: np.ndarray,
-    rec_symbol_id: np.ndarray,
-    rec_weight: np.ndarray,
-    weight_column: str,
-) -> pd.DataFrame:
-    if rec_bar_idx.size == 0:
-        empty = pd.DataFrame(columns=["date", "symbol", weight_column])
-        return empty.set_index(["date", "symbol"])
-
-    result = pd.DataFrame({
-        "date": pd.to_datetime(pool.bars[rec_bar_idx]),
-        "symbol": pool.symbols[rec_symbol_id],
-        weight_column: rec_weight,
-    })
-    return result.set_index(["date", "symbol"]).sort_index()
-
-
 def generate_portfolio_15min(
     pool: BacktestDataset15Min,
     port_size: int,
@@ -816,7 +750,6 @@ def generate_portfolio_15min(
     is_short: bool = True,
     plot_heatmap: bool = True,
     output_dir: str = "output/",
-    record_target_weights: bool = False,
     debug_mode: bool = False,
     debug_symbol: str | None = None,
     debug_datetime: str | None = None,
@@ -835,16 +768,12 @@ def generate_portfolio_15min(
 
     (
         rec_bar_idx,
-        rec_symbol_id,
         rec_source_row,
         rec_weight,
         rec_pred_rank,
         rec_size_rank,
         rec_vwap_ret,
         rec_tradable,
-        target_rec_bar_idx,
-        target_rec_symbol_id,
-        target_rec_weight,
         close_counts_arr,
         turnover_arr,
         bar_returns_arr,
@@ -886,7 +815,6 @@ def generate_portfolio_15min(
         strict_first_bar_top_n=strict_first_bar_top_n,
         trade_on_next_bar=trade_on_next_bar,
         is_short=is_short,
-        record_target=record_target_weights,
         debug_target_symbol_id=debug_target_symbol_id,
         debug_target_bar_idx=debug_target_bar_idx,
     )
@@ -915,7 +843,6 @@ def generate_portfolio_15min(
     positions = _materialize_positions_15min(
         pool=pool,
         rec_bar_idx=rec_bar_idx,
-        rec_symbol_id=rec_symbol_id,
         rec_source_row=rec_source_row,
         rec_weight=rec_weight,
         rec_pred_rank=rec_pred_rank,
@@ -928,15 +855,6 @@ def generate_portfolio_15min(
     portfolio_returns = pd.Series(bar_returns_arr, index=bars, name="portfolio_return")
     turnover = pd.Series(turnover_arr, index=bars, name="turnover")
     held_counts = pd.Series(held_counts_arr, index=bars, name="held_count")
-    target_weights = None
-    if record_target_weights:
-        target_weights = _materialize_weight_snapshots_15min(
-            pool=pool,
-            rec_bar_idx=target_rec_bar_idx,
-            rec_symbol_id=target_rec_symbol_id,
-            rec_weight=target_rec_weight,
-            weight_column="weight_target",
-        )
 
     if plot_heatmap:
         plot_position_heatmap(positions, port_num=port_size, is_short=is_short, output_path=output_dir)
@@ -948,88 +866,4 @@ def generate_portfolio_15min(
         cost_turnover=turnover.copy().rename("cost_turnover"),
         turnover=turnover,
         held_counts=held_counts,
-        target_weights=target_weights,
-    )
-
-
-def generate_target_weights_15min(
-    pool: BacktestDataset15Min,
-    port_size: int,
-    thresh_out_buffer: int = 200,
-    size_cut: int = 9999,
-    close_on_size_drop: bool = True,
-    trade_on_next_bar: bool = True,
-    strict_first_bar_top_n: bool = False,
-    is_short: bool = True,
-) -> pd.DataFrame:
-    """Simulate only to export the ideal target-layer equal-weight snapshots."""
-    thresh_out = port_size + thresh_out_buffer
-    sorted_rows, sorted_offsets = _build_bar_orders(pool, ascending=is_short)
-
-    can_open_exec = (pool.can_trade_sell if is_short else pool.can_trade_buy) & pool.can_open_base
-    can_close_exec = pool.can_trade_buy if is_short else pool.can_trade_sell
-    bars = pd.to_datetime(pool.bars)
-    bar_day_index = pd.factorize(bars.normalize())[0].astype(np.int32)
-
-    (
-        _rec_bar_idx,
-        _rec_symbol_id,
-        _rec_source_row,
-        _rec_weight,
-        _rec_pred_rank,
-        _rec_size_rank,
-        _rec_vwap_ret,
-        _rec_tradable,
-        target_rec_bar_idx,
-        target_rec_symbol_id,
-        target_rec_weight,
-        _close_counts_arr,
-        _turnover_arr,
-        _bar_returns_arr,
-        _held_counts_arr,
-        _debug_reason,
-        _debug_signal_bar_idx,
-        _debug_has_signal_row,
-        _debug_in_size_pool,
-        _debug_can_open_base,
-        _debug_signal_rank,
-        _debug_exec_row_present,
-        _debug_can_open_exec,
-        _debug_close_reason,
-        _debug_target_held_before_close,
-        _debug_can_sell_today,
-        _debug_can_close_exec,
-        _debug_close_rank,
-    ) = _simulate_portfolio_core_15min(
-        bar_offsets=pool.bar_offsets,
-        bar_day_index=bar_day_index,
-        sorted_rows=sorted_rows,
-        sorted_offsets=sorted_offsets,
-        row_symbol_ids=pool.row_symbol_ids,
-        vwap_ret=pool.vwap_ret,
-        pred=pool.pred,
-        size_rank=pool.size_rank,
-        tradable=pool.tradable,
-        can_open_base=pool.can_open_base,
-        can_open=can_open_exec,
-        can_close=can_close_exec,
-        n_symbols=len(pool.symbols),
-        port_size=port_size,
-        thresh_out=thresh_out,
-        size_cut=size_cut,
-        close_on_size_drop=close_on_size_drop,
-        strict_first_bar_top_n=strict_first_bar_top_n,
-        trade_on_next_bar=trade_on_next_bar,
-        is_short=is_short,
-        record_target=True,
-        debug_target_symbol_id=-1,
-        debug_target_bar_idx=-1,
-    )
-
-    return _materialize_weight_snapshots_15min(
-        pool=pool,
-        rec_bar_idx=target_rec_bar_idx,
-        rec_symbol_id=target_rec_symbol_id,
-        rec_weight=target_rec_weight,
-        weight_column="weight_target",
     )
