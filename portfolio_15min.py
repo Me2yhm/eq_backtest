@@ -27,6 +27,7 @@ class PortfolioResult15Min:
     cost_turnover: pd.Series
     turnover: pd.Series
     held_counts: pd.Series
+    target_weights: pd.DataFrame | None = None
 
 
 def _build_bar_orders(pool: BacktestDataset15Min, ascending: bool) -> tuple[np.ndarray, np.ndarray]:
@@ -144,16 +145,11 @@ def _simulate_portfolio_core_15min(
 
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
-    signal_rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
     # Actual holdings can temporarily exceed port_size because T+1 frozen names
     # may coexist with newly opened target names.
     held_symbols = np.full(n_symbols, -1, dtype=np.int32)
     target_symbols = np.full(port_size, -1, dtype=np.int32)
-    next_target_symbols = np.full(port_size, -1, dtype=np.int32)
-    next_target_flags = np.zeros(n_symbols, dtype=np.bool_)
-    retain_candidates = np.full(n_symbols, -1, dtype=np.int32)
-    retain_keys = np.empty(n_symbols, dtype=np.float64)
     sell_candidates = np.full(n_symbols, -1, dtype=np.int32)
     sell_keys = np.empty(n_symbols, dtype=np.float64)
     buy_candidates = np.full(n_symbols, -1, dtype=np.int32)
@@ -210,7 +206,6 @@ def _simulate_portfolio_core_15min(
     debug_close_rank = 0
 
     portfolio_sign = -1.0 if is_short else 1.0
-    nominal_weight = 1.0 / port_size
 
     for bar_idx in range(n_bars):
         # T+1 release: newly bought weights are frozen for the same day.
@@ -222,9 +217,7 @@ def _simulate_portfolio_core_15min(
 
         current_row[:] = -1
         rank_by_symbol[:] = 0
-        signal_rank_by_symbol[:] = 0
         signal_in_size_pool[:] = False
-        next_target_flags[:] = False
 
         bar_start = bar_offsets[bar_idx]
         bar_end = bar_offsets[bar_idx + 1]
@@ -253,7 +246,6 @@ def _simulate_portfolio_core_15min(
 
         if has_signal:
             rank = 0
-            signal_rank = 0
             order_start = sorted_offsets[signal_bar_idx]
             order_end = sorted_offsets[signal_bar_idx + 1]
             has_ranked_signal = order_end > order_start
@@ -274,8 +266,6 @@ def _simulate_portfolio_core_15min(
                     in_size_pool = size_rank[signal_row_idx] < size_cut
                     if in_size_pool:
                         signal_in_size_pool[symbol_id] = True
-                        signal_rank += 1
-                        signal_rank_by_symbol[symbol_id] = signal_rank
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_can_open_base = 1
                             debug_in_size_pool = 1
@@ -290,39 +280,31 @@ def _simulate_portfolio_core_15min(
 
         n_closed = 0
         if has_signal and has_ranked_signal:
-            # 1) Ideal target layer:
-            #    - current top-N signal names have priority, even when can_open=False;
-            #    - retained buffer names only fill the remaining slots;
-            #    - if still underfilled, later openable names backfill to port_size.
-            next_target_count = 0
-            retain_count = 0
+            # 1) Ideal target layer: keep previous target names while they remain
+            # inside the exit buffer, then only consider current signal names
+            # inside the top-N rank frontier. If some names inside that frontier
+            # are not executable, we do not backfill with lower-ranked names.
+            new_target_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
-                signal_rank = signal_rank_by_symbol[symbol_id]
-                if signal_rank > 0 and signal_rank <= port_size:
-                    next_target_flags[symbol_id] = True
-                    next_target_symbols[next_target_count] = symbol_id
-                    next_target_count += 1
-                    continue
-
                 exec_row_idx = current_row[symbol_id]
                 can_exit_target = exec_row_idx != -1 and can_close[exec_row_idx]
                 target_rank_rule = rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out
                 target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
                 if (target_rank_rule or target_size_rule) and can_exit_target:
-                    continue
-
-                retain_candidates[retain_count] = symbol_id
-                retain_rank = rank_by_symbol[symbol_id]
-                retain_keys[retain_count] = (retain_rank if retain_rank > 0 else 1_000_000.0) + symbol_id * 1e-12
-                retain_count += 1
+                    target[symbol_id] = False
+                else:
+                    target_symbols[new_target_count] = symbol_id
+                    new_target_count += 1
+            target_count = new_target_count
 
             for pos in range(order_start, order_end):
-                if next_target_count == port_size:
+                if target_count == port_size:
                     break
                 signal_row_idx = sorted_rows[pos]
                 symbol_id = row_symbol_ids[signal_row_idx]
-                signal_rank = signal_rank_by_symbol[symbol_id]
+                exec_row_idx = current_row[symbol_id]
+                signal_rank = rank_by_symbol[symbol_id]
                 if debug_this_bar and symbol_id == debug_target_symbol_id:
                     target_seen_in_open_loop = True
 
@@ -331,56 +313,19 @@ def _simulate_portfolio_core_15min(
                 if signal_rank > port_size:
                     break
 
-                if signal_in_size_pool[symbol_id] and not next_target_flags[symbol_id]:
-                    next_target_flags[symbol_id] = True
-                    next_target_symbols[next_target_count] = symbol_id
-                    next_target_count += 1
-
-            if retain_count > 0 and next_target_count < port_size:
-                retain_order = np.argsort(retain_keys[:retain_count])
-                for oi in range(retain_count):
-                    if next_target_count == port_size:
-                        break
-                    symbol_id = retain_candidates[retain_order[oi]]
-                    if next_target_flags[symbol_id]:
-                        continue
-                    next_target_flags[symbol_id] = True
-                    next_target_symbols[next_target_count] = symbol_id
-                    next_target_count += 1
-
-            for pos in range(order_start, order_end):
-                if next_target_count == port_size:
-                    break
-                signal_row_idx = sorted_rows[pos]
-                symbol_id = row_symbol_ids[signal_row_idx]
-                exec_row_idx = current_row[symbol_id]
-                signal_rank = signal_rank_by_symbol[symbol_id]
-
-                if signal_rank == 0 or signal_rank <= port_size:
-                    continue
-
                 if (
                     signal_in_size_pool[symbol_id]
                     and exec_row_idx != -1
                     and can_open[exec_row_idx]
-                    and not next_target_flags[symbol_id]
+                    and not target[symbol_id]
                 ):
-                    next_target_flags[symbol_id] = True
-                    next_target_symbols[next_target_count] = symbol_id
-                    next_target_count += 1
-
-            for i in range(target_count):
-                symbol_id = target_symbols[i]
-                target[symbol_id] = False
-            for i in range(next_target_count):
-                symbol_id = next_target_symbols[i]
-                target[symbol_id] = True
-                target_symbols[i] = symbol_id
-            target_count = next_target_count
+                    target[symbol_id] = True
+                    target_symbols[target_count] = symbol_id
+                    target_count += 1
 
             target_weight = 0.0
             if target_count > 0:
-                target_weight = nominal_weight
+                target_weight = 1.0 / target_count
 
             if debug_this_bar:
                 symbol_id = debug_target_symbol_id
@@ -603,7 +548,7 @@ def _simulate_portfolio_core_15min(
         held_counts[bar_idx] = held_count
         current_target_weight = 0.0
         if target_count > 0:
-            current_target_weight = nominal_weight
+            current_target_weight = 1.0 / target_count
 
         for i in range(held_count):
             symbol_id = held_symbols[i]
@@ -817,6 +762,7 @@ def generate_portfolio_15min(
     is_short: bool = True,
     plot_heatmap: bool = True,
     output_dir: str = "output/",
+    record_target_weights: bool = False,
     debug_mode: bool = False,
     debug_symbol: str | None = None,
     debug_datetime: str | None = None,
@@ -842,9 +788,9 @@ def generate_portfolio_15min(
         rec_size_rank,
         rec_vwap_ret,
         rec_tradable,
-        _target_rec_bar_idx,
-        _target_rec_symbol_id,
-        _target_rec_weight,
+        target_rec_bar_idx,
+        target_rec_symbol_id,
+        target_rec_weight,
         close_counts_arr,
         turnover_arr,
         bar_returns_arr,
@@ -883,7 +829,7 @@ def generate_portfolio_15min(
         strict_first_bar_top_n=strict_first_bar_top_n,
         trade_on_next_bar=trade_on_next_bar,
         is_short=is_short,
-        record_target=False,
+        record_target=record_target_weights,
         debug_target_symbol_id=debug_target_symbol_id,
         debug_target_bar_idx=debug_target_bar_idx,
     )
@@ -925,6 +871,15 @@ def generate_portfolio_15min(
     portfolio_returns = pd.Series(bar_returns_arr, index=bars, name="portfolio_return")
     turnover = pd.Series(turnover_arr, index=bars, name="turnover")
     held_counts = pd.Series(held_counts_arr, index=bars, name="held_count")
+    target_weights = None
+    if record_target_weights:
+        target_weights = _materialize_weight_snapshots_15min(
+            pool=pool,
+            rec_bar_idx=target_rec_bar_idx,
+            rec_symbol_id=target_rec_symbol_id,
+            rec_weight=target_rec_weight,
+            weight_column="weight_target",
+        )
 
     if plot_heatmap:
         plot_position_heatmap(positions, port_num=port_size, is_short=is_short, output_path=output_dir)
@@ -936,6 +891,7 @@ def generate_portfolio_15min(
         cost_turnover=turnover.copy().rename("cost_turnover"),
         turnover=turnover,
         held_counts=held_counts,
+        target_weights=target_weights,
     )
 
 

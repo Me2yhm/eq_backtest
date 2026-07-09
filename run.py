@@ -96,6 +96,12 @@ def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
     # frame.write_csv(output_path)
 
 
+def _write_target_weights(target_weights: pd.DataFrame, csv_path: str, parquet_path: str) -> None:
+    frame = pl.from_pandas(target_weights.reset_index())
+    frame.write_csv(csv_path)
+    frame.write_parquet(parquet_path)
+
+
 def _build_portfolio_pnl_frame(
     portfolio_returns: pd.Series,
     cost_turnover: pd.Series,
@@ -210,6 +216,7 @@ def run() -> None:
                 strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
                 is_short=cfg.IS_SHORT,
                 output_dir=output_dir,
+                record_target_weights=True,
                 debug_mode=cfg.DEBUG_15MIN,
                 debug_symbol=cfg.DEBUG_SYMBOL_15MIN,
                 debug_datetime=cfg.DEBUG_DATETIME_15MIN,
@@ -230,6 +237,12 @@ def run() -> None:
         positions = result.positions
         close_counts = result.close_counts
         _write_positions_csv(positions, f"{output_dir}positions_{port_size}.csv")
+        if cfg.USE_15MIN and result.target_weights is not None:
+            _write_target_weights(
+                result.target_weights,
+                f"{output_dir}target_weights_{port_size}.csv",
+                f"{output_dir}target_weights_{port_size}.parquet",
+            )
 
         if cfg.USE_15MIN:
             portfolio_returns_eval = daily_returns_from_15min(result.portfolio_returns)
