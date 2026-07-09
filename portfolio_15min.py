@@ -561,7 +561,7 @@ def _simulate_portfolio_core_15min(
         held_counts[bar_idx] = held_count
         current_target_weight = 0.0
         if target_count > 0:
-            current_target_weight = 1.0 / target_count
+            current_target_weight = nominal_weight
 
         for i in range(held_count):
             symbol_id = held_symbols[i]
