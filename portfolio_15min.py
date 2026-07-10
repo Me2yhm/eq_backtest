@@ -115,9 +115,6 @@ def _simulate_portfolio_core_15min(
     sorted_offsets: np.ndarray,
     row_symbol_ids: np.ndarray,
     vwap_ret: np.ndarray,
-    close_prev: np.ndarray,
-    close_curr: np.ndarray,
-    vwap15: np.ndarray,
     pred: np.ndarray,
     size_rank: np.ndarray,
     tradable: np.ndarray,
@@ -132,7 +129,6 @@ def _simulate_portfolio_core_15min(
     strict_first_bar_top_n: bool,
     trade_on_next_bar: bool,
     is_short: bool,
-    cost_per_turnover: float,
     record_target: bool,
     debug_target_symbol_id: int,
     debug_target_bar_idx: int,
@@ -147,10 +143,6 @@ def _simulate_portfolio_core_15min(
     frozen_weights = np.zeros(n_symbols, dtype=np.float64)
     cash_weight = 1.0
 
-    # share-based 状态 (对齐 backtest.py L783-784)
-    portfolio_value = 1e8  # 初始资金
-    current_shares = np.zeros(n_symbols, dtype=np.float64)  # 持仓股数
-
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
@@ -162,7 +154,6 @@ def _simulate_portfolio_core_15min(
     sell_keys = np.empty(n_symbols, dtype=np.float64)
     buy_candidates = np.full(n_symbols, -1, dtype=np.int32)
     buy_keys = np.empty(n_symbols, dtype=np.float64)
-    buy_existing = np.zeros(n_symbols, dtype=np.bool_)
 
     prev_weights = np.zeros(n_symbols, dtype=np.float64)
     curr_weights = np.zeros(n_symbols, dtype=np.float64)
@@ -233,37 +224,6 @@ def _simulate_portfolio_core_15min(
         for row_idx in range(bar_start, bar_end):
             symbol_id = row_symbol_ids[row_idx]
             current_row[symbol_id] = row_idx
-
-        # ── Share-based Step 1-2 (对齐 backtest.py L786-800) ──
-        prev_capital = portfolio_value
-
-        # Step 1: 上期持仓 close→vwap 收益
-        prev_pnl = 0.0
-        if bar_idx > 0:
-            for i in range(held_count):
-                symbol_id = held_symbols[i]
-                row_idx = current_row[symbol_id]
-                if row_idx == -1:
-                    continue
-                sh = current_shares[symbol_id]
-                if abs(sh) <= eps:
-                    continue
-                cp = close_prev[row_idx]
-                v = vwap15[row_idx]
-                if cp > 0 and v > 0:
-                    prev_pnl += sh * (v - cp)
-            portfolio_value += prev_pnl
-
-        # Step 2: shares → weights 同步（供 target selection 使用）
-        if abs(portfolio_value) > eps:
-            for i in range(held_count):
-                symbol_id = held_symbols[i]
-                row_idx = current_row[symbol_id]
-                if row_idx == -1:
-                    continue
-                v = vwap15[row_idx]
-                if v > 0:
-                    current_weights[symbol_id] = current_shares[symbol_id] * v / portfolio_value
 
         signal_bar_idx = bar_idx - 1 if trade_on_next_bar else bar_idx
         has_signal = signal_bar_idx >= 0
@@ -365,12 +325,11 @@ def _simulate_portfolio_core_15min(
                     and can_open_base[exec_row_idx]
                 )
 
-                # External buy_candidates restricts rank_pos <= port_size;
-                # never fill slots from rank > port_size.
-                if rank_by_symbol[symbol_id] > port_size:
-                    continue
-
-                if signal_in_size_pool[symbol_id] and target_can_enter and not target[symbol_id]:
+                if (
+                    signal_in_size_pool[symbol_id]
+                    and target_can_enter
+                    and not target[symbol_id]
+                ):
                     target[symbol_id] = True
                     target_symbols[target_count] = symbol_id
                     target_count += 1
@@ -465,10 +424,7 @@ def _simulate_portfolio_core_15min(
                     held[symbol_id] = False
             held_count = new_held_count
 
-            # 3) Actual buy layer: buy target deficits by deficit desc, first
-            # topping existing actual names, then opening new names.
-            # External (actual.md L107-140) confirms two-phase: existing first,
-            # then new.  Sort key is (deficit desc, stock_idx asc).
+            # 3) Actual buy layer: buy target deficits by prediction desc.
             buy_count = 0
             for i in range(target_count):
                 symbol_id = target_symbols[i]
@@ -478,44 +434,34 @@ def _simulate_portfolio_core_15min(
                 deficit = target_weight - current_weights[symbol_id]
                 if deficit > eps:
                     buy_candidates[buy_count] = symbol_id
-                    buy_keys[buy_count] = -deficit + symbol_id * 1e-12
-                    buy_existing[buy_count] = current_weights[symbol_id] > eps
+                    buy_keys[buy_count] = -pred[row_idx] + symbol_id * 1e-12
                     buy_count += 1
 
             if buy_count > 0 and cash_weight > eps:
                 buy_order = np.argsort(buy_keys[:buy_count])
-                for phase in range(2):
+                for oi in range(buy_count):
                     if cash_weight <= eps:
                         break
-                    for oi in range(buy_count):
-                        if cash_weight <= eps:
-                            break
-                        cand_idx = buy_order[oi]
-                        if phase == 0 and not buy_existing[cand_idx]:
-                            continue
-                        if phase == 1 and buy_existing[cand_idx]:
-                            continue
+                    symbol_id = buy_candidates[buy_order[oi]]
+                    deficit = target_weight - current_weights[symbol_id]
+                    if deficit <= eps:
+                        continue
+                    buy_w = deficit
+                    if buy_w > cash_weight:
+                        buy_w = cash_weight
+                    if buy_w <= eps:
+                        continue
 
-                        symbol_id = buy_candidates[cand_idx]
-                        deficit = target_weight - current_weights[symbol_id]
-                        if deficit <= eps:
-                            continue
-                        buy_w = deficit
-                        if buy_w > cash_weight:
-                            buy_w = cash_weight
-                        if buy_w <= eps:
-                            continue
-
-                        was_held = current_weights[symbol_id] > eps
-                        current_weights[symbol_id] += buy_w
-                        cash_weight -= buy_w
-                        frozen_weights[symbol_id] += buy_w
-                        if not was_held:
-                            held[symbol_id] = True
-                            held_symbols[held_count] = symbol_id
-                            held_count += 1
-                        if debug_this_bar and symbol_id == debug_target_symbol_id:
-                            debug_reason = 200
+                    was_held = current_weights[symbol_id] > eps
+                    current_weights[symbol_id] += buy_w
+                    cash_weight -= buy_w
+                    frozen_weights[symbol_id] += buy_w
+                    if not was_held:
+                        held[symbol_id] = True
+                        held_symbols[held_count] = symbol_id
+                        held_count += 1
+                    if debug_this_bar and symbol_id == debug_target_symbol_id:
+                        debug_reason = 200
 
             if debug_this_bar and debug_close_reason < 0:
                 if current_weights[debug_target_symbol_id] <= eps:
@@ -541,21 +487,26 @@ def _simulate_portfolio_core_15min(
 
         close_counts[bar_idx] = n_closed
 
-        # ── Share-based Step 3-5 + turnover (对齐 backtest.py L802-863) ──
-
-        # 构建 curr_weights / curr_symbols 快照（target selection 后）
+        bar_ret = 0.0
         curr_count = 0
         for i in range(held_count):
             symbol_id = held_symbols[i]
             actual_w = current_weights[symbol_id]
             if actual_w <= eps:
                 continue
+
             signed_w = portfolio_sign * actual_w
             curr_weights[symbol_id] = signed_w
             curr_symbols[curr_count] = symbol_id
             curr_count += 1
 
-        # 计算 turnover（与旧逻辑一致：0.5 × Σ|curr - prev|）
+            row_idx = current_row[symbol_id]
+            if row_idx == -1:
+                continue
+            r = vwap_ret[row_idx]
+            if np.isfinite(r):
+                bar_ret += signed_w * r
+
         touched_count = 0
         for i in range(prev_count):
             symbol_id = prev_symbols[i]
@@ -577,53 +528,9 @@ def _simulate_portfolio_core_15min(
             turnover += abs(curr_weights[symbol_id] - prev_weights[symbol_id])
 
         turnover *= 0.5
-
-        # Step 3: 成本扣除 + weights → shares 同步 (L802-826)
-        transaction_cost = 0.0
-        if has_signal and has_ranked_signal:
-            transaction_cost = portfolio_value * 2.0 * turnover * cost_per_turnover
-            portfolio_value -= transaction_cost
-            # 同步 weights → shares (portfolio_sign 保证 shares 符号正确)
-            if abs(portfolio_value) > eps:
-                for i in range(held_count):
-                    symbol_id = held_symbols[i]
-                    row_idx = current_row[symbol_id]
-                    if row_idx == -1:
-                        continue
-                    v = vwap15[row_idx]
-                    if v > 0:
-                        current_shares[symbol_id] = portfolio_sign * current_weights[symbol_id] * portfolio_value / v
-            # 清仓股票 shares 归零
-            for i in range(prev_count):
-                symbol_id = prev_symbols[i]
-                if current_weights[symbol_id] <= eps:
-                    current_shares[symbol_id] = 0.0
-
-        # Step 4: 本期持仓 vwap→close 收益 (L834-838)
-        current_pnl = 0.0
-        for i in range(held_count):
-            symbol_id = held_symbols[i]
-            row_idx = current_row[symbol_id]
-            if row_idx == -1:
-                continue
-            sh = current_shares[symbol_id]
-            if abs(sh) <= eps:
-                continue
-            v = vwap15[row_idx]
-            cc = close_curr[row_idx]
-            if v > 0 and cc > 0:
-                current_pnl += sh * (cc - v)
-        portfolio_value += current_pnl
-
-        # Step 5: 记录收益率 (L840-863, 分母 = prev_capital)
-        if abs(prev_capital) > eps:
-            bar_ret = (prev_pnl + current_pnl - transaction_cost) / prev_capital
-        else:
-            bar_ret = 0.0
         bar_turnover[bar_idx] = turnover
         bar_returns[bar_idx] = bar_ret
 
-        # post-bar bookkeeping
         for i in range(prev_count):
             symbol_id = prev_symbols[i]
             if curr_weights[symbol_id] == 0.0:
@@ -742,16 +649,19 @@ def _materialize_positions_15min(
 
     snapshot_bars = pd.to_datetime(pool.bars[rec_bar_idx])
     symbols = pool.symbols[rec_symbol_id]
-    records = pl.DataFrame({
-        "snapshot_bar": snapshot_bars,
-        "symbol": symbols,
-        "ret": rec_vwap_ret,
-        "weight_actual": rec_weight,
-        "size_rank_recorded": rec_size_rank,
-        "tradable": rec_tradable,
-        "pred_rank": rec_pred_rank,
-        "vwap_ret": rec_vwap_ret,
-    }).with_columns(pl.col("snapshot_bar").dt.date().alias("snapshot_date"))
+    records = (
+        pl.DataFrame({
+            "snapshot_bar": snapshot_bars,
+            "symbol": symbols,
+            "ret": rec_vwap_ret,
+            "weight_actual": rec_weight,
+            "size_rank_recorded": rec_size_rank,
+            "tradable": rec_tradable,
+            "pred_rank": rec_pred_rank,
+            "vwap_ret": rec_vwap_ret,
+        })
+        .with_columns(pl.col("snapshot_bar").dt.date().alias("snapshot_date"))
+    )
 
     daily_columns = [
         "date",
@@ -777,10 +687,7 @@ def _materialize_positions_15min(
     positions = (
         records
         .join(
-            pool.daily_snapshot_frame.select(daily_columns).rename({
-                "date": "snapshot_date",
-                "size_rank": "size_rank_daily",
-            }),
+            pool.daily_snapshot_frame.select(daily_columns).rename({"date": "snapshot_date", "size_rank": "size_rank_daily"}),
             on=["snapshot_date", "symbol"],
             how="left",
         )
@@ -859,7 +766,6 @@ def generate_portfolio_15min(
     debug_mode: bool = False,
     debug_symbol: str | None = None,
     debug_datetime: str | None = None,
-    cost_per_turnover: float = 0.00045,
 ) -> PortfolioResult15Min:
     """Simulate a 15-minute equal-weight portfolio with daily constraints."""
     thresh_out = port_size + thresh_out_buffer
@@ -909,9 +815,6 @@ def generate_portfolio_15min(
         sorted_offsets=sorted_offsets,
         row_symbol_ids=pool.row_symbol_ids,
         vwap_ret=pool.vwap_ret,
-        close_prev=pool.close_prev,
-        close_curr=pool.close_curr,
-        vwap15=pool.vwap15,
         pred=pool.pred,
         size_rank=pool.size_rank,
         tradable=pool.tradable,
@@ -926,7 +829,6 @@ def generate_portfolio_15min(
         strict_first_bar_top_n=strict_first_bar_top_n,
         trade_on_next_bar=trade_on_next_bar,
         is_short=is_short,
-        cost_per_turnover=cost_per_turnover,
         record_target=record_target_weights,
         debug_target_symbol_id=debug_target_symbol_id,
         debug_target_bar_idx=debug_target_bar_idx,
@@ -1048,9 +950,6 @@ def generate_target_weights_15min(
         sorted_offsets=sorted_offsets,
         row_symbol_ids=pool.row_symbol_ids,
         vwap_ret=pool.vwap_ret,
-        close_prev=pool.close_prev,
-        close_curr=pool.close_curr,
-        vwap15=pool.vwap15,
         pred=pool.pred,
         size_rank=pool.size_rank,
         tradable=pool.tradable,
