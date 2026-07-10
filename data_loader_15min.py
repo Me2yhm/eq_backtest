@@ -22,7 +22,6 @@ from data_loader import load_benchmark
 FLAG_COLUMNS = [
     "date",
     "symbol",
-    "market_cap_3",
     "log_size",
     "size_rank",
     "industry",
@@ -295,9 +294,8 @@ def build_pool_15min(
     market_15m = load_15min_market(data_15min_path, start, end=end)
     daily_flags = load_daily_flags(daily_data_path, start, end, universe, allow_st_open, nosuspend_days)
     preds_15m = load_15min_predictions(preds_15min_dir, horizons_15min, start, end=end)
-    # Match the external candidate-pool format:
-    # first filter by the local daily base universe definition, then rank by
-    # market_cap_3 within each date to get the top-POOL_SIZE names.
+    # Candidate-pool ranking uses the local daily base universe definition
+    # first, then ranks by log_size within each date.
     # Intraday tradability such as turnover or limit hits must not affect rank.
     valid_universe_expr = (
         (pl.col("normal_days") >= nosuspend_days)
@@ -309,10 +307,10 @@ def build_pool_15min(
 
     eligible_ranked_daily = (
         daily_flags
-        .filter(valid_universe_expr & pl.col("market_cap_3").is_finite())
-        .select(["date", "symbol", "market_cap_3"])
+        .filter(valid_universe_expr)
+        .select(["date", "symbol", "log_size"])
         .with_columns(
-            pl.col("market_cap_3").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank")
+            pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank")
         )
         .select(["date", "symbol", "size_rank"])
     )
