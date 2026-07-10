@@ -1,7 +1,7 @@
 ---
 description: "需求沟通阶段 Agent。用于理解 human 需求、主动挖掘潜在需求、生成工程化需求文档。当需要明确需求、需求澄清、生成需求文档时使用。触发词：需求沟通、communicate、需求分析、需求文档。"
 model: "GLM-5.2 Coder (copilot)"
-tools: [read, search, web]
+tools: [read, edit, search, execute, web]
 handoffs: [plan]
 user-invocable: true
 ---
