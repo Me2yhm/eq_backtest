@@ -303,7 +303,7 @@ def _simulate_portfolio_core_15min(
                         target_seen_in_sorted = True
                         debug_has_signal_row = 1
 
-                    in_size_pool = size_rank[signal_row_idx] < size_cut
+                    in_size_pool = size_rank[signal_row_idx] <= size_cut
                     if in_size_pool:
                         signal_in_size_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:

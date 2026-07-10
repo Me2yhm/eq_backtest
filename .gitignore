@@ -147,4 +147,5 @@ output_*
 *draft*
 *.rar
 tmp/
-docs/workflow/
+ext_scripts/intrafull_rankxendcg_v4_1_ideal_layer_current_source.md
+ext_scripts/intrafull_rankxendcg_v4_1_ideal_layer.py
