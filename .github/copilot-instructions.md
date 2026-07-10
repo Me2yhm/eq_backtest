@@ -110,3 +110,65 @@ Actual Progressive Execution (per bar):
 - When suggesting a change, state the hypothesis first, then the code change, then
   the exact validation command to run.
 - Never output a code block with file changes — use the edit tools instead.
+
+## Dev Workflow Conventions
+
+本项目的开发流程遵循多阶段工作流：**communicate → plan → implement → judge → (plan → implement → judge)… → summary → over**
+
+```
+communicate → plan → implement → judge ⇄ plan → summary → over
+                        ↑                    │
+                        └────────────────────┘
+                   (循环直到需求完成或质量达标)
+```
+
+### 模型使用策略
+
+| 阶段 | 模型 | 需 Human 确认 |
+|------|------|:---:|
+| **communicate** | GLM-5.2 Coder (`glm-5.2`) | ✅ |
+| **plan** | GLM-5.2 Coder (`glm-5.2`) | ✅ |
+| **implement** | DeepSeek V4 Pro | ❌ 自动 |
+| **judge** | GLM-5.2 Coder (`glm-5.2`) | ❌ 自动 |
+| **summary** | DeepSeek V4 Pro | ❌ 自动 |
+
+### 文档目录
+
+所有工作流产物统一存放在 communicate 阶段确认的文档目录下（默认 `docs/workflow/`）：
+
+| 产物 | 路径 |
+|------|------|
+| 需求文档 | `{doc_dir}/requirements.md` |
+| 计划文档 | `{doc_dir}/plans/*.md` |
+| 验收报告 | `{doc_dir}/reports/*.md` |
+| 评审日志 | `{doc_dir}/judge-logs/*.md` |
+| 总结报告 | `{doc_dir}/summary.md` |
+
+### 流转规则
+
+| 阶段 | 模型 | 需 Human 确认 | 产出 |
+|------|------|:---:|------|
+| **communicate** | GLM-5.2 | ✅ | `requirements.md` |
+| **plan** | GLM-5.2 | ✅ | `plans/*.md` |
+| **implement** | DeepSeek | ❌ 自动 | `reports/*.md` + git commits |
+| **judge** | GLM-5.2 | ❌ 自动 | `judge-logs/*.md` |
+| **summary** | DeepSeek | ❌ 自动 | `summary.md` |
+
+### Git 提交规范
+
+implement 阶段每完成一个 checkpoint 做一次 git commit，格式：
+
+```
+<type>(<scope>): <简短描述>
+
+完成需求: <FR-01, FR-02>
+Checkpoint: <名称>
+```
+
+### 与回测验证工作流的关系
+
+- 上述 Dev Workflow 适用于**新功能开发、复杂重构、多轮迭代**等场景。
+- 日常的回测对齐工作（修改 `portfolio_15min.py` 等核心文件、运行 `compare_positions.py`）
+  仍遵循上方的 **Standard Work Cycle**（Hypothesize → Implement → Run → Compare → Record → Decide），
+  不启动完整 Dev Workflow。
+- 当回测对齐涉及大规模重构或架构变更时，应启动 Dev Workflow 进行管理。
