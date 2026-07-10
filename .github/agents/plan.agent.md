@@ -1,7 +1,7 @@
 ---
 description: "计划制定阶段 Agent。基于需求文档制定实施计划，拆解为可执行的 checkpoints。当需求已明确、需要制定实施计划、任务拆解时使用。触发词：制定计划、plan、实施计划、任务拆解。"
 model: "GLM-5.2 Coder (copilot)"
-tools: [read, edit, search, execute, web]
+tools: [read, edit, search, web]
 handoffs: [implement]
 user-invocable: true
 ---
