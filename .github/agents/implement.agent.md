@@ -46,6 +46,8 @@ user-invocable: true
 1. `git add` 本 checkpoint 涉及的所有修改文件
 2. `git commit` 提交，message 格式如下：
 
+**⚠️ 绝对禁止 `git add -f`**：不要用 `-f` 强制添加 `.gitignore` 中已忽略的文件（如 `tmp/`、`docs/workflow/` 等）。如果文件被 gitignore 忽略，说明它不应该被提交，只需保留在工作区即可。
+
 ```
 <type>(<scope>): <简短描述>
 
