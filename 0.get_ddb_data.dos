@@ -37,7 +37,7 @@ daily = select *,
 daily = select symbol,date,turnover,log_size,size_rank,bfill!(ffill!(industry)) as industry,index,next(nd_ret) as ret, is_limit_up,is_limit_down, limit_up_price, limit_down_price from daily context by symbol csort date
 
 
-def allValidCondition(daily,startDate,listedOver=20){
+def allValidCondition(daily,startDate,listedOver=19){
     // 上市超过x天
     listed = select * from loadTable("dfs://stocks_daily", "stock_listed_date")
     t = lj(select symbol, date from daily, listed, `symbol)

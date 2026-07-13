@@ -3,10 +3,13 @@ go
 
 // 定义起始和结束年份
 START_YEAR = 2019
-END_YEAR = 2026 // 请根据实际数据年份修改此值
+// START_YEAR = 2026
+// END_YEAR = 2026 // 请根据实际数据年份修改此值
+END_YEAR = 2019 // 请根据实际数据年份修改此值
+
 
 // 创建一个内存表作为最终结果的容器
-finalResult = table(1:0, `symbol`datetime`open`vwap15`turnover`vwap_ret, [SYMBOL, DATETIME, DOUBLE, DOUBLE, DOUBLE, DOUBLE])
+finalResult = table(1:0, `symbol`datetime`open`turnover`vwap15`vwap_ret, [SYMBOL, DATETIME, DOUBLE, DOUBLE, DOUBLE, DOUBLE])
 
 // 按年循环处理
 for(year in START_YEAR..END_YEAR) {
@@ -23,43 +26,51 @@ for(year in START_YEAR..END_YEAR) {
 
     print("Processing year: " + string(year) + ", data rows: " + string(bar1Min.size()))
 
-    // 2. 处理 09:31 的数据
-    bar_0931 = select symbol, datetime, open, high, low, close, total_turnover, (open+high+low+close)/4 as vwap15 
-               from bar1Min 
-               where Tradetime = 09:31:00.000
-
-    // 3. 处理 09:32-14:46 的数据（聚合为15分钟）
-    bar_0932_1446 = select * from bar1Min where Tradetime between 09:32:00.000 and 14:46:00.000
-    update bar_0932_1446 set Tradetime = temporalAdd(Tradetime, -1m)
-    bar_0932_1446 = select firstNot(open) as open, last(close) as close, max(high) as high, min(low) as low, sum(total_turnover) as total_turnover,
+    // 2. 处理 09:32-11:16 的数据（聚合为15分钟，左闭合）
+    bar_0932_1116 = select * from bar1Min where Tradetime between 09:32:00.000 and 11:16:00.000
+    update bar_0932_1116 set Tradetime = temporalAdd(Tradetime, -1m)
+    bar_0932_1116 = select firstNot(open) as open, last(close) as close, max(high) as high, min(low) as low, sum(total_turnover) as total_turnover,
                            iif(sum(volume) > 0, sum(volume * (open+high+low+close)/4) \ sum(volume), avg((open+high+low+close)/4)) as vwap15
-                    from bar_0932_1446 
-                    group by symbol, Date, interval(X=Tradetime, duration=15m, fill="none", closed="right", label="right") as Tradetime
-    update bar_0932_1446 set Tradetime = temporalAdd(Tradetime, 1m)
-    bar_0932_1446 = select symbol, concatDateTime(Date, Tradetime) as datetime, open, high, low, close, total_turnover, vwap15 
-                    from bar_0932_1446
+                    from bar_0932_1116 
+                    group by symbol, Date, interval(X=Tradetime, duration=15m, fill="none", closed="right", label="left") as Tradetime
+    update bar_0932_1116 set Tradetime = temporalAdd(Tradetime, 1m)
+    bar_0932_1116 = select symbol, concatDateTime(Date, Tradetime) as datetime, open, high, low, close, total_turnover, vwap15 
+                    from bar_0932_1116
 
-    // 4. 处理 14:47-15:00 的数据
-    bar_1447_1500 = select symbol, datetime, open, high, low, close, total_turnover, volume, Date, Tradetime 
-                    from bar1Min 
-                    where Tradetime between 14:47:00.000 and 15:00:00.000
-    bar_1447_1500 = select last(datetime) as datetime, firstNot(open) as open, max(high) as high, min(low) as low, last(close) as close, sum(total_turnover) as total_turnover,
+    // 3. 处理 11:17-13:01 的数据（单独聚合为一条，左闭合）
+    bar_1117_1301 = select symbol, datetime, open, high, low, close, total_turnover, volume, Date, Tradetime 
+                from bar1Min 
+                where Tradetime between 11:17:00.000 and 13:01:00.000
+    bar_1117_1301 = select last(concatDateTime(Date, 11:16:00.000)) as datetime, firstNot(open) as open, max(high) as high, min(low) as low, last(close) as close, sum(total_turnover) as total_turnover,
+                    iif(sum(volume) > 0, sum(volume * (open+high+low+close)/4) \ sum(volume), avg((open+high+low+close)/4)) as vwap15
+                from bar_1117_1301 
+                group by symbol, Date
+    bar_1117_1301 = select symbol, datetime, open, high, low, close, total_turnover, vwap15 
+                    from bar_1117_1301
+
+    // 4. 处理 13:02-15:00 的数据（聚合为15分钟，左闭合）
+    bar_1302_1500 = select * from bar1Min where Tradetime between 13:02:00.000 and 15:00:00.000
+    update bar_1302_1500 set Tradetime = temporalAdd(Tradetime, -1m)
+    bar_1302_1500 = select firstNot(open) as open, last(close) as close, max(high) as high, min(low) as low, sum(total_turnover) as total_turnover,
                            iif(sum(volume) > 0, sum(volume * (open+high+low+close)/4) \ sum(volume), avg((open+high+low+close)/4)) as vwap15
-                    from bar_1447_1500 
-                    group by symbol, Date
-    bar_1447_1500 = select symbol, datetime, open, high, low, close, total_turnover, vwap15 
-                    from bar_1447_1500
+                    from bar_1302_1500 
+                    group by symbol, Date, interval(X=Tradetime, duration=15m, fill="none", closed="right", label="left") as Tradetime
+    update bar_1302_1500 set Tradetime = temporalAdd(Tradetime, 1m)
+    bar_1302_1500 = select symbol, concatDateTime(Date, Tradetime) as datetime, open, high, low, close, total_turnover, vwap15 
+                    from bar_1302_1500
 
-    // 5. 合并该年的三个子集，计算vwap_ret
-    yearResult = select * from bar_0931
+    // 5. 合并该年的三个子集，计算 vwap_ret
+    yearResult = select * from bar_0932_1116
                 union all
-                select * from bar_0932_1446
+                select * from bar_1117_1301
                 union all
-                select * from bar_1447_1500
+                select * from bar_1302_1500
+
+    yearResult = select * from yearResult order by datetime, symbol
     yearResult = select symbol, datetime, 
                 open,
-                vwap15,
                 total_turnover as turnover,
+                vwap15,
                 next(vwap15 / prev(vwap15) - 1) as vwap_ret 
                 from yearResult 
                 context by symbol csort datetime
@@ -71,6 +82,8 @@ for(year in START_YEAR..END_YEAR) {
 }
 
 // 7. 保存最终结果
-parquet::saveParquet(finalResult, "/home/trq/update_daily/15min_bar_full.parquet")
+parquet::saveParquet(finalResult, "/home/trq/update_daily/15min_bar_full_left.parquet")
 
 print("All years processed and saved successfully.")
+
+// aaa = select * from yearResult where symbol == "300385.XSHE"
