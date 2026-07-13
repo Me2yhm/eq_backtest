@@ -3,6 +3,8 @@ description: "代码实现阶段 Agent。按计划逐 checkpoint 执行编码任
 model: "DeepSeek V4 Pro (deepseek)"
 tools: [read, edit, search, execute, web]
 handoffs: [judge]
+agents: [judge]
+disable-model-invocation: false
 user-invocable: true
 ---
 
