@@ -1,7 +1,7 @@
 undef all
 
 go
-START = 2019.01.01
+START = 2018.12.28
 
 
 
@@ -9,6 +9,7 @@ START = 2019.01.01
 daily = select symbol, date, open, close, limit_up as limit_up_price, limit_down as limit_down_price, total_turnover as turnover from loadTable("dfs://stocks_daily", "bars_ex") where date >= START
 // 获取市值排名
 size = select trade_day as date, symbol, value as size , log(value) as log_size from loadTable("dfs://stocks_fundamental", "rq_fundamental") where field_name == 'market_cap_3' and value != NULL and trade_day >= START
+size = select date, symbol, prev(size) as size, prev(log_size) as log_size from size context by symbol csort date
 size = select date, symbol, log_size, rank(size, false) as size_rank from size context by date order by date
 // 获取行业数据
 industry = select trade_day as date, symbol, value as industry from loadTable("dfs://stocks_daily", "stock_price_info") where field_name == 'citics_2019_first'
@@ -58,4 +59,4 @@ daily = select * from allValidCondition(daily,START) where ret is not null
 
 // saveText(daily, "save/daily.csv")
 // parquet::saveParquet(daily, "save/daily.pqt")
-parquet::saveParquet(daily, "/home/trq/update_daily/daily_with_limit.pqt")
+parquet::saveParquet(daily, "/home/trq/update_daily/daily_with_limit_prevcap.pqt")
