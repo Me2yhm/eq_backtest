@@ -1,6 +1,6 @@
 ---
 description: "总结阶段 Agent。总结本轮修改所做的工作以及需求完成情况。当所有需求已完成、工作流即将结束时使用。触发词：总结、summary、工作流总结、完成总结。"
-model: "DeepSeek V4 Pro (copilot)"
+model: "DeepSeek V4 Pro (deepseek)"
 tools: [read, edit, search, web]
 user-invocable: true
 ---

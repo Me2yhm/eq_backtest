@@ -126,11 +126,14 @@ communicate → plan → implement → judge ⇄ plan → summary → over
 
 | 阶段 | 模型 | 需 Human 确认 |
 |------|------|:---:|
-| **communicate** | GLM-5.2 Coder (`glm-5.2`) | ✅ |
-| **plan** | GLM-5.2 Coder (`glm-5.2`) | ✅ |
-| **implement** | DeepSeek V4 Pro | ❌ 自动 |
-| **judge** | GLM-5.2 Coder (`glm-5.2`) | ❌ 自动 |
-| **summary** | DeepSeek V4 Pro | ❌ 自动 |
+| **communicate** | `GLM-5.2 Coder (customendpoint)` | ✅ |
+| **plan** | `GLM-5.2 Coder (customendpoint)` | ✅ |
+| **implement** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 |
+| **judge** | `GLM-5.2 Coder (customendpoint)` | ❌ 自动 |
+| **summary** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 |
+
+> **注意**: `model` 字段格式必须为 `"<Display Name> (<vendor>)"`，其中 Display Name 是模型选择器中显示的**大写带空格**名称（如 `"GPT-4o"`、`"Claude Sonnet 4.5"`、`"DeepSeek V4 Pro"`），不是内部 model ID（如 `gpt-4o`、`claude-sonnet-4.5`、`deepseek-v4-pro`）。
+> 如需使用 GLM，需先安装 `vicanent.gcmp` 或 `smallmain.vscode-unify-chat-provider` 扩展。
 
 ### 文档目录
 
@@ -148,11 +151,11 @@ communicate → plan → implement → judge ⇄ plan → summary → over
 
 | 阶段 | 模型 | 需 Human 确认 | 产出 |
 |------|------|:---:|------|
-| **communicate** | GLM-5.2 | ✅ | `requirements.md` |
-| **plan** | GLM-5.2 | ✅ | `plans/*.md` |
-| **implement** | DeepSeek | ❌ 自动 | `reports/*.md` + git commits |
-| **judge** | GLM-5.2 | ❌ 自动 | `judge-logs/*.md` |
-| **summary** | DeepSeek | ❌ 自动 | `summary.md` |
+| **communicate** | `GLM-5.2 Coder (customendpoint)` | ✅ | `requirements.md` |
+| **plan** | `GLM-5.2 Coder (customendpoint)` | ✅ | `plans/*.md` |
+| **implement** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 | `reports/*.md` + git commits |
+| **judge** | `GLM-5.2 Coder (customendpoint)` | ❌ 自动 | `judge-logs/*.md` |
+| **summary** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 | `summary.md` |
 
 ### Git 提交规范
 

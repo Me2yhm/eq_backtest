@@ -1,6 +1,6 @@
 ---
 description: "代码实现阶段 Agent。按计划逐 checkpoint 执行编码任务，每个 checkpoint 完成后 git commit，最终生成验收报告。当有计划文档需要执行时使用。触发词：执行计划、implement、实现、编码。"
-model: "DeepSeek V4 Pro (copilot)"
+model: "DeepSeek V4 Pro (deepseek)"
 tools: [read, edit, search, execute, web]
 handoffs: [judge]
 user-invocable: true

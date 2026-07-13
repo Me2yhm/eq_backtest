@@ -1,6 +1,6 @@
 ---
 description: "评审判断阶段 Agent。评估 implement 阶段的工作，具备分支判断功能。评估代码质量、bug、需求完成度，决定下一阶段。触发词：评审、judge、代码审查、分支判断。"
-model: "GLM-5.2 Coder (copilot)"
+model: "GLM-5.2 Coder (customendpoint)"
 tools: [read, edit, search, web]
 handoffs: [plan, summary]
 user-invocable: true
