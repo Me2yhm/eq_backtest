@@ -93,6 +93,7 @@ def _debug_reason_text(code: int) -> str:
         107: "开仓前组合已满仓（port_size已占满）",
         108: "strict_first_bar_top_n限制导致首执行bar未开仓",
         109: "信号bar无任何有效预测值（排序列表为空），本bar不执行调仓",
+        110: "目标股票在买入候选中，但轮到它时现金已耗尽（或不足以成交）",
         200: "目标股票成功开仓",
         301: "目标股票在该bar调仓前并未持仓（无平仓动作）",
         302: "目标股票受T+0限制，当天新开后不可卖出",
@@ -203,6 +204,12 @@ def _simulate_portfolio_core_15min(
     debug_can_sell_today = 0
     debug_can_close_exec = 0
     debug_close_rank = 0
+    debug_cash_after_sell = 0.0
+    debug_buy_order_rank = 0
+    debug_buy_cash_before = 0.0
+    debug_buy_deficit = 0.0
+    debug_buy_executed_weight = 0.0
+    debug_frozen_weight = 0.0
 
     portfolio_sign = -1.0 if is_short else 1.0
     nominal_weight = 1.0 / port_size
@@ -437,13 +444,22 @@ def _simulate_portfolio_core_15min(
                     buy_keys[buy_count] = -pred[row_idx] + symbol_id * 1e-12
                     buy_count += 1
 
-            if buy_count > 0 and cash_weight > eps:
+            if debug_this_bar:
+                debug_cash_after_sell = cash_weight
+
+            if buy_count > 0:
                 buy_order = np.argsort(buy_keys[:buy_count])
                 for oi in range(buy_count):
-                    if cash_weight <= eps:
-                        break
                     symbol_id = buy_candidates[buy_order[oi]]
                     deficit = target_weight - current_weights[symbol_id]
+                    if debug_this_bar and symbol_id == debug_target_symbol_id:
+                        debug_buy_order_rank = oi + 1
+                        debug_buy_cash_before = cash_weight
+                        debug_buy_deficit = deficit
+                    if cash_weight <= eps:
+                        if debug_this_bar:
+                            continue
+                        break
                     if deficit <= eps:
                         continue
                     buy_w = deficit
@@ -456,6 +472,8 @@ def _simulate_portfolio_core_15min(
                     current_weights[symbol_id] += buy_w
                     cash_weight -= buy_w
                     frozen_weights[symbol_id] += buy_w
+                    if debug_this_bar and symbol_id == debug_target_symbol_id:
+                        debug_buy_executed_weight = buy_w
                     if not was_held:
                         held[symbol_id] = True
                         held_symbols[held_count] = symbol_id
@@ -472,6 +490,7 @@ def _simulate_portfolio_core_15min(
                     debug_close_reason = 302
                 else:
                     debug_close_reason = 304
+                debug_frozen_weight = frozen_weights[debug_target_symbol_id]
 
         if debug_this_bar and debug_reason < 0:
             if not has_signal:
@@ -484,6 +503,8 @@ def _simulate_portfolio_core_15min(
                 debug_reason = 103
             elif target[debug_target_symbol_id] and current_weights[debug_target_symbol_id] > eps:
                 debug_reason = 106
+            elif debug_buy_order_rank > 0 and debug_buy_executed_weight <= eps:
+                debug_reason = 110
 
         close_counts[bar_idx] = n_closed
 
@@ -610,6 +631,12 @@ def _simulate_portfolio_core_15min(
         debug_can_sell_today,
         debug_can_close_exec,
         debug_close_rank,
+        debug_cash_after_sell,
+        debug_buy_order_rank,
+        debug_buy_cash_before,
+        debug_buy_deficit,
+        debug_buy_executed_weight,
+        debug_frozen_weight,
     )
 
 
@@ -808,6 +835,12 @@ def generate_portfolio_15min(
         debug_can_sell_today,
         debug_can_close_exec,
         debug_close_rank,
+        debug_cash_after_sell,
+        debug_buy_order_rank,
+        debug_buy_cash_before,
+        debug_buy_deficit,
+        debug_buy_executed_weight,
+        debug_frozen_weight,
     ) = _simulate_portfolio_core_15min(
         bar_offsets=pool.bar_offsets,
         bar_day_index=bar_day_index,
@@ -850,6 +883,15 @@ def generate_portfolio_15min(
             f"can_sell_today={bool(debug_can_sell_today)}",
             f"can_close_exec={bool(debug_can_close_exec)}",
             f"close_rank={int(debug_close_rank)}",
+        )
+        print(
+            "buy_debug:",
+            f"cash_after_sell={debug_cash_after_sell:.12g}",
+            f"buy_order_rank={int(debug_buy_order_rank)}",
+            f"cash_before_candidate={debug_buy_cash_before:.12g}",
+            f"buy_deficit={debug_buy_deficit:.12g}",
+            f"buy_executed_weight={debug_buy_executed_weight:.12g}",
+            f"frozen_weight={debug_frozen_weight:.12g}",
         )
         print(f"decision_code={debug_reason}, reason={_debug_reason_text(int(debug_reason))}")
         print(f"close_decision_code={debug_close_reason}, close_reason={_debug_reason_text(int(debug_close_reason))}")
@@ -943,6 +985,12 @@ def generate_target_weights_15min(
         _debug_can_sell_today,
         _debug_can_close_exec,
         _debug_close_rank,
+        _debug_cash_after_sell,
+        _debug_buy_order_rank,
+        _debug_buy_cash_before,
+        _debug_buy_deficit,
+        _debug_buy_executed_weight,
+        _debug_frozen_weight,
     ) = _simulate_portfolio_core_15min(
         bar_offsets=pool.bar_offsets,
         bar_day_index=bar_day_index,
