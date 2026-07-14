@@ -15,29 +15,45 @@ import pandas as pd
 ANN_DAYS = 242  # trading days per year
 
 
-def portfolio_metrics(daily_returns: pd.Series, risk_free_rate: float = 0.0) -> dict:
+def portfolio_metrics(
+    daily_returns: pd.Series, risk_free_rate: float = 0.0, compounding: bool = False
+) -> dict:
     """
     Compute annualized performance metrics from a daily return series.
+
+    Parameters
+    ----------
+    daily_returns : daily return series
+    risk_free_rate : annual risk-free rate
+    compounding : False=算术年化(mean×242, 外部使用), True=几何年化(原逻辑)
 
     Returns
     -------
     dict with keys:
-        Ann. Return   – geometric annualized return
+        Ann. Return   – annualized return
         Volatility    – annualized standard deviation
         Sharpe        – annualized Sharpe ratio
-        Max Drawdown  – worst peak-to-trough decline
+        Max Drawdown  – worst peak-to-trough decline (外部口径)
         Calmar        – annualized return / abs(max drawdown)
     """
-    years = len(daily_returns) / ANN_DAYS
-    cum_ret: float = (1 + daily_returns).prod()  # type: ignore[assignment]
-    ann_ret = cum_ret ** (1 / years) - 1
+    if compounding:
+        # 几何年化（原逻辑）
+        years = len(daily_returns) / ANN_DAYS
+        cum_ret: float = (1 + daily_returns).prod()  # type: ignore[assignment]
+        ann_ret = cum_ret ** (1 / years) - 1
+    else:
+        # 算术年化（对齐外部 metrics.py L41）
+        ann_ret = daily_returns.mean() * ANN_DAYS
 
     vol = daily_returns.std() * np.sqrt(ANN_DAYS)
     sharpe = (ann_ret - risk_free_rate) / vol if vol else np.nan
 
-    wealth = (1 + daily_returns).cumprod()
-    drawdown = wealth / wealth.expanding().max() - 1
-    max_dd = drawdown.min()
+    # MaxDD: 外部口径 (对齐 backtest metrics max_drawdown L88-99)
+    # nav = (1+x).cumprod(), drawdown = nav - cummax, 取 quantile(0.001)
+    nav = (1 + daily_returns).cumprod()
+    drawdown = nav - nav.expanding().max()
+    max_dd = float(drawdown.quantile(0.001))
+
     calmar = ann_ret / abs(max_dd) if max_dd else np.nan
 
     return {

@@ -282,7 +282,7 @@ def run() -> None:
             float_format="%.8f",
         )
 
-        m = portfolio_metrics(excess)
+        m = portfolio_metrics(excess, compounding=cfg.COMPOUNDING)
         m["Ann. Turnover"] = float(turnover.mean() * 242)
         all_metrics[port_size] = m
         all_ret[port_size] = excess.rename(f"Port_{port_size}")
