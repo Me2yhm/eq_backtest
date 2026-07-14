@@ -220,6 +220,7 @@ def run() -> None:
                 debug_mode=cfg.DEBUG_15MIN,
                 debug_symbol=cfg.DEBUG_SYMBOL_15MIN,
                 debug_datetime=cfg.DEBUG_DATETIME_15MIN,
+                cost_per_turnover=cfg.COST_PER_TURNOVER,
             )
         else:
             result = generate_portfolio(
