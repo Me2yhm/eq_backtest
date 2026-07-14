@@ -147,4 +147,4 @@ output_*
 *draft*
 *.rar
 tmp/
-docs/workflow/
+docs/workflow*/
