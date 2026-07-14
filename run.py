@@ -37,12 +37,13 @@ def compute_returns(
     is_short: bool,
     cost: float,
     exclude_period: tuple | None,
+    deduct_cost: bool = True,
 ) -> tuple:
     """
     Compute daily excess returns and one-way turnover for a single portfolio.
 
     Excess return = benchmark - portfolio (short) or portfolio - benchmark (long),
-    minus transaction cost.
+    minus transaction cost (only when deduct_cost=True; 15min 模式引擎已扣成本).
 
     Returns
     -------
@@ -51,7 +52,8 @@ def compute_returns(
     """
     bm_aligned = bm_ret.reindex(portfolio_returns.index)
     excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
-    excess -= cost_turnover.mul(cost)
+    if deduct_cost:
+        excess -= cost_turnover.mul(cost)
 
     if exclude_period:
         lo = pd.to_datetime(exclude_period[0])
@@ -61,12 +63,18 @@ def compute_returns(
     return excess, turnover
 
 
-def daily_returns_from_15min(returns_15min: pd.Series) -> pd.Series:
-    """Aggregate 15-minute returns to daily compounded returns."""
+def daily_returns_from_15min(returns_15min: pd.Series, agg_mode: str = "simple") -> pd.Series:
+    """Aggregate 15-minute returns to daily returns.
+
+    agg_mode: "simple" = sum(bar_ret), "compound" = (1+x).prod()-1
+    """
     if returns_15min.empty:
         return returns_15min
     grouped = returns_15min.groupby(returns_15min.index.normalize())
-    return grouped.apply(lambda x: (1.0 + x).prod() - 1.0).rename(returns_15min.name)
+    if agg_mode == "compound":
+        return grouped.apply(lambda x: (1.0 + x).prod() - 1.0).rename(returns_15min.name)
+    else:
+        return grouped.sum().rename(returns_15min.name)
 
 
 def daily_sum_from_15min(series_15min: pd.Series, name: str) -> pd.Series:
@@ -111,10 +119,15 @@ def _build_portfolio_pnl_frame(
     is_short: bool,
     cost: float,
     exclude_period: tuple | None,
+    deduct_cost: bool = True,
 ) -> pd.DataFrame:
     daily_benchmark = _align_benchmark_to_index(bm_ret, portfolio_returns.index).fillna(0.0).rename("daily_benchmark")
     daily_tto = turnover.rename("daily_tto").copy()
-    daily_strategy = portfolio_returns.sub(cost_turnover.mul(cost)).rename("daily_strategy")
+    if deduct_cost:
+        daily_strategy = portfolio_returns.sub(cost_turnover.mul(cost)).rename("daily_strategy")
+    else:
+        # 15min 模式: 引擎已扣成本，直接用 portfolio_returns
+        daily_strategy = portfolio_returns.rename("daily_strategy")
     daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
     daily_alpha = daily_alpha.rename("daily_alpha")
 
@@ -245,8 +258,9 @@ def run() -> None:
                 f"{output_dir}target_weights_{port_size}.parquet",
             )
 
-        if cfg.USE_15MIN:
-            portfolio_returns_eval = daily_returns_from_15min(result.portfolio_returns)
+        use_15min = cfg.USE_15MIN
+        if use_15min:
+            portfolio_returns_eval = daily_returns_from_15min(result.portfolio_returns, agg_mode=cfg.AGG_MODE)
             cost_turnover_eval = daily_sum_from_15min(result.cost_turnover, "cost_turnover")
             turnover_eval = daily_sum_from_15min(result.turnover, "turnover")
             close_counts_eval = pd.DataFrame({
@@ -258,6 +272,8 @@ def run() -> None:
             turnover_eval = result.turnover
             close_counts_eval = close_counts
 
+        # 15min 模式: 引擎已扣成本; 日级模式: 仍需日级扣成本
+        deduct_cost = not use_15min
         excess, turnover = compute_returns(
             portfolio_returns_eval,
             cost_turnover_eval,
@@ -266,6 +282,7 @@ def run() -> None:
             is_short=cfg.IS_SHORT,
             cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
+            deduct_cost=deduct_cost,
         )
         portfolio_pnl = _build_portfolio_pnl_frame(
             portfolio_returns=portfolio_returns_eval,
@@ -276,6 +293,7 @@ def run() -> None:
             is_short=cfg.IS_SHORT,
             cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
+            deduct_cost=deduct_cost,
         )
         portfolio_pnl.to_csv(
             f"{output_dir}portfolio_pnl_{port_size}.csv",
