@@ -299,10 +299,7 @@ def _simulate_portfolio_core_15min(
             for i in range(target_count):
                 symbol_id = target_symbols[i]
                 exec_row_idx = current_row[symbol_id]
-                target_valid_listed = (
-                    exec_row_idx != -1
-                    and can_open_base[exec_row_idx]
-                )
+                target_valid_listed = exec_row_idx != -1 and can_open_base[exec_row_idx]
                 target_rank_rule = rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out
                 target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
                 if target_rank_rule or target_size_rule or not target_valid_listed:
@@ -327,16 +324,9 @@ def _simulate_portfolio_core_15min(
                 if signal_rank > port_size:
                     break
 
-                target_can_enter = (
-                    exec_row_idx != -1
-                    and can_open_base[exec_row_idx]
-                )
+                target_can_enter = exec_row_idx != -1 and can_open_base[exec_row_idx]
 
-                if (
-                    signal_in_size_pool[symbol_id]
-                    and target_can_enter
-                    and not target[symbol_id]
-                ):
+                if signal_in_size_pool[symbol_id] and target_can_enter and not target[symbol_id]:
                     target[symbol_id] = True
                     target_symbols[target_count] = symbol_id
                     target_count += 1
