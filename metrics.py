@@ -15,9 +15,7 @@ import pandas as pd
 ANN_DAYS = 242  # trading days per year
 
 
-def portfolio_metrics(
-    daily_returns: pd.Series, risk_free_rate: float = 0.0, compounding: bool = False
-) -> dict:
+def portfolio_metrics(daily_returns: pd.Series, risk_free_rate: float = 0.0, compounding: bool = False) -> dict:
     """
     Compute annualized performance metrics from a daily return series.
 
