@@ -46,6 +46,17 @@ THRESH_OUT_BUFFER = 600
 TRADE_ON_NEXT_DAY = True  # True: day T signals are executed on day T+1; False: same-day signal/same-day portfolio
 STRICT_FIRST_DAY_TOP_N = False  # True: first day only opens from strict top-N ranks; False: keep scanning until full
 
+# ── Aggregation & annualization (对齐外部 metrics.py) ─────────────────────────
+# AGG_MODE: bar→日聚合方式
+#   "simple"   - 日收益 = sum(bar_ret)  （外部使用，算术叠加）
+#   "compound" - 日收益 = (1+x).prod()-1  （复利叠加）
+AGG_MODE = "simple"
+
+# COMPOUNDING: 年化方式
+#   False - 算术年化: mean × 242  （外部使用）
+#   True  - 几何年化: (1+x).prod()^(242/n) - 1
+COMPOUNDING = False
+
 # ── Transaction cost (one-way) ────────────────────────────────────────────────
 COST_PER_TURNOVER = 0.00045
 
