@@ -17,9 +17,8 @@ import pandas as pd
 import polars as pl
 from loguru import logger
 
-from data_loader import load_benchmark, load_external_benchmark
-
 import config as cfg
+from data_loader import load_benchmark, load_external_benchmark
 
 FLAG_COLUMNS = [
     "date",
@@ -314,18 +313,14 @@ def build_pool_15min(
         daily_flags
         .filter(valid_universe_expr)
         .select(["date", "symbol", "log_size"])
-        .with_columns(
-            pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank")
-        )
+        .with_columns(pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank"))
         .select(["date", "symbol", "size_rank"])
     )
     ranked_daily = (
         daily_flags
         .drop("size_rank")
         .join(eligible_ranked_daily, on=["date", "symbol"], how="left")
-        .with_columns(
-            pl.col("size_rank").fill_null(999999).cast(pl.Int32)
-        )
+        .with_columns(pl.col("size_rank").fill_null(999999).cast(pl.Int32))
     )
 
     pool = (
