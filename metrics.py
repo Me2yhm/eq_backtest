@@ -46,11 +46,14 @@ def portfolio_metrics(daily_returns: pd.Series, risk_free_rate: float = 0.0, com
     vol = daily_returns.std() * np.sqrt(ANN_DAYS)
     sharpe = (ann_ret - risk_free_rate) / vol if vol else np.nan
 
-    # MaxDD: 相对回撤率口径 (对齐 compute_external_metrics_v2.py ground truth)
-    # wealth = (1+x).cumprod(), drawdown = wealth/cummax - 1, 取 min
-    wealth = (1 + daily_returns).cumprod()
-    drawdown = wealth / wealth.expanding().max() - 1.0
-    max_dd = float(drawdown.min())
+    # MaxDD: 外部口径 (对齐 evaluation/metrics.py L88-99 + utils/utils.py L124-133)
+    # wealth = 1.0 + cumsum() (算术累计, compounding="simple")
+    # drawdown = wealth - expanding().max() (绝对回撤)
+    # 取 quantile(0.001) (0.1% 分位数)
+    # 旧口径: wealth=(1+x).cumprod(), drawdown=wealth/cummax-1, 取 min()
+    wealth = 1.0 + daily_returns.cumsum()
+    drawdown = wealth - wealth.expanding().max()
+    max_dd = float(drawdown.quantile(0.001))
 
     calmar = ann_ret / abs(max_dd) if max_dd else np.nan
 

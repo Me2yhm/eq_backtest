@@ -55,10 +55,12 @@ def compute_returns(
     if deduct_cost:
         excess -= cost_turnover.mul(cost)
 
+    # exclude_period: 删除行 (对齐 evaluation/metrics.py L252-259 _apply_metric_filters)
+    # 旧口径: 置零 (excess.loc[...] = 0.0)
     if exclude_period:
         lo = pd.to_datetime(exclude_period[0])
         hi = pd.to_datetime(exclude_period[1])
-        excess.loc[(excess.index >= lo) & (excess.index < hi)] = 0.0
+        excess = excess[(excess.index < lo) | (excess.index >= hi)]
 
     return excess, turnover
 
@@ -131,18 +133,25 @@ def _build_portfolio_pnl_frame(
     daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
     daily_alpha = daily_alpha.rename("daily_alpha")
 
-    if exclude_period:
-        lo = pd.to_datetime(exclude_period[0])
-        hi = pd.to_datetime(exclude_period[1])
-        mask = (daily_strategy.index >= lo) & (daily_strategy.index < hi)
-        daily_strategy.loc[mask] = 0.0
-        daily_alpha.loc[mask] = 0.0
-        daily_tto.loc[mask] = 0.0
-
     all_pl = daily_strategy.cumsum().rename("all_pl")
     alpha_pl = daily_alpha.cumsum().rename("alpha_pl")
     benchmark = daily_benchmark.cumsum().rename("benchmark")
     close_count = close_counts["n_closed"].reindex(portfolio_returns.index).fillna(0).astype(int).rename("close_count")
+
+    # exclude_period: 删除行 (对齐 evaluation/metrics.py L252-259)
+    # 旧口径: 置零 daily_strategy/daily_alpha/daily_tto
+    if exclude_period:
+        lo = pd.to_datetime(exclude_period[0])
+        hi = pd.to_datetime(exclude_period[1])
+        keep = (daily_strategy.index < lo) | (daily_strategy.index >= hi)
+        all_pl = all_pl[keep]
+        alpha_pl = alpha_pl[keep]
+        benchmark = benchmark[keep]
+        daily_strategy = daily_strategy[keep]
+        daily_benchmark = daily_benchmark[keep]
+        daily_alpha = daily_alpha[keep]
+        daily_tto = daily_tto[keep]
+        close_count = close_count[keep]
 
     frame = pd.concat(
         [
