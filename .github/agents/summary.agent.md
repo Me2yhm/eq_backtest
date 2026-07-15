@@ -1,8 +1,8 @@
 ---
-description: "总结阶段 Agent。总结本轮修改所做的工作以及需求完成情况。当所有需求已完成、工作流即将结束时使用。触发词：总结、summary、工作流总结、完成总结。"
+description: "总结阶段 Agent。总结本轮修改所做的工作以及需求完成情况。作为 subagent 被 coordinator 调用。触发词：总结、summary、工作流总结、完成总结。"
 model: "DeepSeek V4 Pro (deepseek)"
 tools: [read, edit, search, web]
-user-invocable: true
+user-invocable: false
 ---
 
 # Summary Agent — 工作总结
@@ -11,7 +11,8 @@ user-invocable: true
 
 ## 输入
 
-- `{doc_dir}/requirements.md` — 需求文档
+- `docs/workflow/.state.json` — 通过 `doc_dir` 字段定位当前工作流的文档目录
+- `{doc_dir}/requirements.md` — 需求文档（`{doc_dir}` 来自 `.state.json` 的 `doc_dir` 字段）
 - `{doc_dir}/plans/` — 所有计划文档
 - `{doc_dir}/reports/` — 所有验收报告
 - `{doc_dir}/judge-logs/` — 所有评审日志
@@ -21,8 +22,8 @@ user-invocable: true
 
 ### Step 1: 定位文档目录
 
-- 读取 `{doc_dir}/requirements.md` 确认文档目录
-- 默认使用 `docs/workflow/`
+- 读取 `docs/workflow/.state.json` 获取 `doc_dir` 字段，作为当前工作流的文档目录
+- 如果 `.state.json` 不存在或 `doc_dir` 缺失，默认使用 `docs/workflow/`
 
 ### Step 2: 收集信息
 
@@ -32,7 +33,11 @@ user-invocable: true
 
 ### Step 3: 生成总结报告
 
-- 写入 `{doc_dir}/summary.md`
+- 总结报告文件使用固定名：`{doc_dir}/summary.md`（子目录内固定名，每轮工作流有独立子目录，不再需要时间戳区分）
+- 若 coordinator 提示"因达到最大轮次限制而结束"，在总结的"结论"部分标记：
+  ```
+  ⚠️ 本轮因达到最大轮次限制（N 轮）而强制结束，需求未全部完成。
+  ```
 
 总结报告模板：
 
@@ -92,8 +97,4 @@ user-invocable: true
 
 ## 完成后
 
-告知 human：
-
-> 🎉 工作流已完成！总结报告已生成在 `{doc_dir}/summary.md`。
-> 
-> **所有阶段结束（over）。**
+返回给 coordinator。**subagent 不直接告知 human，由 coordinator 统一输出结束信息。**

@@ -113,13 +113,18 @@ Actual Progressive Execution (per bar):
 
 ## Dev Workflow Conventions
 
-本项目的开发流程遵循多阶段工作流：**communicate → plan → implement → judge → (plan → implement → judge)… → summary → over**
+本项目的开发流程采用**混合路线**架构的多阶段工作流：
+
+- **communicate / plan**：独立 agent，通过 handoffs 按钮半自动切换（human 确认点）
+- **implement / judge / summary**：subagent，由 coordinator 全自动编排
 
 ```
-communicate → plan → implement → judge ⇄ plan → summary → over
-                        ↑                    │
-                        └────────────────────┘
-                   (循环直到需求完成或质量达标)
+communicate → plan → coordinator → (implement → judge) ⇄ plan → summary → over
+    ✅           ✅         🤖            🤖      🤖                      🤖
+  (人工确认)  (人工确认)  (自动编排)   (自动执行) (自动评审)            (自动总结)
+                                   ↑                    │
+                                   └────────────────────┘
+                              (循环直到需求完成或质量达标)
 ```
 
 ### 模型使用策略
@@ -128,34 +133,46 @@ communicate → plan → implement → judge ⇄ plan → summary → over
 |------|------|:---:|
 | **communicate** | `GLM-5.2 Coder (customendpoint)` | ✅ |
 | **plan** | `GLM-5.2 Coder (customendpoint)` | ✅ |
+| **coordinator** | `DeepSeek V4 Pro (deepseek)`（可配置） | ❌ 自动 |
 | **implement** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 |
 | **judge** | `GLM-5.2 Coder (customendpoint)` | ❌ 自动 |
 | **summary** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 |
+| **researcher** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动（被 communicate/plan 调用） |
 
 > **注意**: `model` 字段格式必须为 `"<Display Name> (<vendor>)"`，其中 Display Name 是模型选择器中显示的**大写带空格**名称（如 `"GPT-4o"`、`"Claude Sonnet 4.5"`、`"DeepSeek V4 Pro"`），不是内部 model ID（如 `gpt-4o`、`claude-sonnet-4.5`、`deepseek-v4-pro`）。
 > 如需使用 GLM，需先安装 `vicanent.gcmp` 或 `smallmain.vscode-unify-chat-provider` 扩展。
 
 ### 文档目录
 
-所有工作流产物统一存放在 communicate 阶段确认的文档目录下（默认 `docs/workflow/`）：
+所有工作流产物存放在独立子目录下。`.state.json` 位于根目录，`doc_dir` 字段指向当前工作流子目录：
+- `docs/workflow/.state.json` — 工作流状态文件（根目录，唯一可覆盖文件；`doc_dir` 字段指向当前子目录）
+- `{doc_dir}/requirements.md` — 需求文档（子目录内固定名，不再时间戳备份）
+- `{doc_dir}/plans/` — 计划文档（子目录内按编号保存）
+- `{doc_dir}/reports/` — 验收报告（子目录内按编号保存）
+- `{doc_dir}/judge-logs/` — 评审日志（子目录内按编号保存）
+- `{doc_dir}/summary.md` — 总结报告（子目录内固定名，不再时间戳命名）
 
-| 产物 | 路径 |
-|------|------|
-| 需求文档 | `{doc_dir}/requirements.md` |
-| 计划文档 | `{doc_dir}/plans/*.md` |
-| 验收报告 | `{doc_dir}/reports/*.md` |
-| 评审日志 | `{doc_dir}/judge-logs/*.md` |
-| 总结报告 | `{doc_dir}/summary.md` |
+> 每轮工作流使用独立子目录（如 `docs/workflow/per-workflow-subdir/`），子目录名由 communicate 第一轮确定（英文 kebab-case）。历史文档不迁移，只对新工作流生效。
 
 ### 流转规则
 
-| 阶段 | 模型 | 需 Human 确认 | 产出 |
-|------|------|:---:|------|
-| **communicate** | `GLM-5.2 Coder (customendpoint)` | ✅ | `requirements.md` |
-| **plan** | `GLM-5.2 Coder (customendpoint)` | ✅ | `plans/*.md` |
-| **implement** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 | `reports/*.md` + git commits |
-| **judge** | `GLM-5.2 Coder (customendpoint)` | ❌ 自动 | `judge-logs/*.md` |
-| **summary** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 | `summary.md` |
+| 阶段 | 模型 | 需 Human 确认 | 切换机制 | 产出 |
+|------|------|:---:|------|------|
+| **communicate** | `GLM-5.2 Coder (customendpoint)` | ✅ | handoffs 按钮 | `requirements.md` + `.state.json` |
+| **plan** | `GLM-5.2 Coder (customendpoint)` | ✅ | handoffs 按钮 | `plans/*.md` |
+| **coordinator** | `DeepSeek V4 Pro (deepseek)`（可配置） | ❌ 自动 | `agent` 工具调用 subagent | 更新 `.state.json` |
+| **implement** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 | subagent 返回 coordinator | `reports/*.md` + git commits |
+| **judge** | `GLM-5.2 Coder (customendpoint)` | ❌ 自动 | subagent 返回 coordinator，含 `<!-- NEXT_STAGE: xxx -->` | `judge-logs/*.md` |
+| **summary** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 | subagent 返回 coordinator | `summary.md` |
+| **researcher** | `DeepSeek V4 Pro (deepseek)` | ❌ 自动 | 被 communicate/plan 通过 `agent` 工具调用，返回结构化报告 | 结构化报告（返回给 communicate/plan） |
+
+### Handoffs 说明
+
+- communicate → plan：human 点击"进入计划阶段"按钮确认需求后切换
+- plan → coordinator：human 点击"开始自动实现"按钮确认计划后切换
+- coordinator 内部（implement → judge → summary）：全自动，无需 human
+- judge → plan（返工）：coordinator 停止自动循环，human 手动切换到 plan agent
+- communicate/plan → researcher：通过 `agent` 工具调用（非 handoffs），researcher 完成后返回结构化报告给调用方
 
 ### Git 提交规范
 
