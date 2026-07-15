@@ -25,6 +25,12 @@ HORIZONS = ["3d", "5d", "10d"]
 # ── Benchmark ─────────────────────────────────────────────────────────────────
 BM_NAME = "csi_1000"
 
+# 是否使用外部 nav.parquet 的 benchmark_return 作为 benchmark
+# 对齐外部回测的 benchmark 数据源（诊断发现外部 benchmark 有 0.9412 缩放因子）
+# 详见 docs/workflow/align-maxdd/plans/plan-02-benchmark-alignment.md
+USE_EXTERNAL_BENCHMARK = True
+EXTERNAL_NAV_PATH = Path("/ext/trq/nav.parquet")
+
 # ── Stock universe (index membership required to open a position) ─────────────
 # UNIVERSE = ["000300.XSHG", "000905.XSHG", "000852.XSHG"]
 UNIVERSE = None

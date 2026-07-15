@@ -17,7 +17,9 @@ import pandas as pd
 import polars as pl
 from loguru import logger
 
-from data_loader import load_benchmark
+from data_loader import load_benchmark, load_external_benchmark
+
+import config as cfg
 
 FLAG_COLUMNS = [
     "date",
@@ -289,7 +291,10 @@ def build_pool_15min(
     pool_15m : BacktestDataset15Min
     bm_ret   : daily benchmark return Series
     """
-    bm_ret = load_benchmark(bm_path)
+    if getattr(cfg, "USE_EXTERNAL_BENCHMARK", False):
+        bm_ret = load_external_benchmark(cfg.EXTERNAL_NAV_PATH)
+    else:
+        bm_ret = load_benchmark(bm_path)
 
     market_15m = load_15min_market(data_15min_path, start, end=end)
     daily_flags = load_daily_flags(daily_data_path, start, end, universe, allow_st_open, nosuspend_days)

@@ -89,6 +89,23 @@ def load_benchmark(path: Path) -> pd.Series:
     return pd.Series(result)
 
 
+def load_external_benchmark(nav_path: Path) -> pd.Series:
+    """从外部 nav.parquet 提取日频 benchmark_return。
+
+    外部 nav.parquet 的 benchmark_return 是 bar 级（日内平坦，16 bar 相同值），
+    按日期取首个值即为日频 benchmark 收益。
+
+    诊断发现外部 benchmark 与本地 CSI 1000 存在系统性 0.9412 缩放因子
+    (ext_bm = 0.9412 × csi_ret, R²=0.9998)，直接使用外部数据可消除此差异。
+    """
+    nav = pd.read_parquet(nav_path)
+    # benchmark_return 是日收益按 bar 均分（每 bar = 日收益 / bar 数），sum 得日收益
+    daily_bm = nav["benchmark_return"].groupby(nav.index.normalize()).sum()
+    daily_bm.index.name = "date"
+    daily_bm.name = "ret"
+    return daily_bm
+
+
 # ── Predictions ───────────────────────────────────────────────────────────────
 
 
