@@ -164,7 +164,6 @@ def _simulate_portfolio_core_15min(
     buy_candidates = np.full(n_symbols, -1, dtype=np.int32)
     buy_keys = np.empty(n_symbols, dtype=np.float64)
 
-    prev_weights = np.zeros(n_symbols, dtype=np.float64)
     curr_weights = np.zeros(n_symbols, dtype=np.float64)
     prev_symbols = np.full(n_symbols, -1, dtype=np.int32)
     curr_symbols = np.full(n_symbols, -1, dtype=np.int32)
@@ -259,6 +258,24 @@ def _simulate_portfolio_core_15min(
                 if cp > 0 and v > 0:
                     prev_pnl += sh * (v - cp)
             portfolio_value += prev_pnl
+
+        # Step 2: 调仓前盯市权重 (对齐 compute_external_metrics.py L345-352)
+        # current_weights_np = shares × vwap / portfolio_value (portfolio_value 已含 prev_pnl)
+        marktomarket_weights = np.zeros(n_symbols, dtype=np.float64)
+        if abs(portfolio_value) > eps:
+            for i in range(held_count):
+                symbol_id = held_symbols[i]
+                row_idx = current_row[symbol_id]
+                if row_idx == -1:
+                    continue
+                sh = current_shares[symbol_id]
+                if abs(sh) <= eps:
+                    continue
+                v = vwap15[row_idx]
+                if v > 0 and np.isfinite(v):
+                    w = sh * v / portfolio_value
+                    if abs(w) > eps:
+                        marktomarket_weights[symbol_id] = w
 
         signal_bar_idx = bar_idx - 1 if trade_on_next_bar else bar_idx
         has_signal = signal_bar_idx >= 0
@@ -540,7 +557,14 @@ def _simulate_portfolio_core_15min(
             curr_symbols[curr_count] = symbol_id
             curr_count += 1
 
-        # 计算 turnover（与旧逻辑一致：0.5 × Σ|curr - prev|）
+        # 计算 turnover（方案 B: 0.5 × Σ|effective_target - current_weights_np|）
+        # 对齐 Reference: turnover = 0.5 × Σ|curr_weights - marktomarket_weights|
+        # curr_weights = 调仓后实际权重 (effective_target)
+        # marktomarket_weights = 调仓前盯市权重 (current_weights_np, 含股价漂移)
+        # 并集遍历 prev_symbols ∪ curr_symbols，确保覆盖：
+        #   - 仍持有但权重变化的股票
+        #   - 已清仓的股票 (curr_weights=0, marktomarket_weights>0)
+        #   - 新开仓的股票 (curr_weights>0, marktomarket_weights=0)
         touched_count = 0
         for i in range(prev_count):
             symbol_id = prev_symbols[i]
@@ -559,7 +583,7 @@ def _simulate_portfolio_core_15min(
         for i in range(touched_count):
             symbol_id = touched_symbols[i]
             touched[symbol_id] = False
-            turnover += abs(curr_weights[symbol_id] - prev_weights[symbol_id])
+            turnover += abs(curr_weights[symbol_id] - marktomarket_weights[symbol_id])
 
         turnover *= 0.5
 
@@ -609,15 +633,11 @@ def _simulate_portfolio_core_15min(
         bar_returns[bar_idx] = bar_ret
 
         # post-bar bookkeeping
-        for i in range(prev_count):
-            symbol_id = prev_symbols[i]
-            if curr_weights[symbol_id] == 0.0:
-                prev_weights[symbol_id] = 0.0
-
+        # 仅维护 prev_symbols/prev_count（并集遍历 turnover 需要），不再维护 prev_weights
+        # （方案 B 的 turnover 基准是实时盯市权重 marktomarket_weights，不依赖名义权重复制）
         next_prev_count = 0
         for i in range(curr_count):
             symbol_id = curr_symbols[i]
-            prev_weights[symbol_id] = curr_weights[symbol_id]
             prev_symbols[next_prev_count] = symbol_id
             next_prev_count += 1
             curr_weights[symbol_id] = 0.0
