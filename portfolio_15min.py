@@ -559,45 +559,57 @@ def _simulate_portfolio_core_15min(
 
         # 计算 turnover（方案 B: 0.5 × Σ|effective_target - current_weights_np|）
         # 对齐 Reference: turnover = 0.5 × Σ|curr_weights - marktomarket_weights|
+        # 关键对齐：Reference 仅在 has_signal 的 bar 计算 turnover，
+        # 非信号 bar 的 turnover 为 0（价格漂移不计入 turnover）。
         # curr_weights = 调仓后实际权重 (effective_target)
         # marktomarket_weights = 调仓前盯市权重 (current_weights_np, 含股价漂移)
         # 并集遍历 prev_symbols ∪ curr_symbols，确保覆盖：
         #   - 仍持有但权重变化的股票
         #   - 已清仓的股票 (curr_weights=0, marktomarket_weights>0)
         #   - 新开仓的股票 (curr_weights>0, marktomarket_weights=0)
-        touched_count = 0
-        for i in range(prev_count):
-            symbol_id = prev_symbols[i]
-            if not touched[symbol_id]:
-                touched[symbol_id] = True
-                touched_symbols[touched_count] = symbol_id
-                touched_count += 1
-        for i in range(curr_count):
-            symbol_id = curr_symbols[i]
-            if not touched[symbol_id]:
-                touched[symbol_id] = True
-                touched_symbols[touched_count] = symbol_id
-                touched_count += 1
+        if has_signal and has_ranked_signal:
+            touched_count = 0
+            for i in range(prev_count):
+                symbol_id = prev_symbols[i]
+                if not touched[symbol_id]:
+                    touched[symbol_id] = True
+                    touched_symbols[touched_count] = symbol_id
+                    touched_count += 1
+            for i in range(curr_count):
+                symbol_id = curr_symbols[i]
+                if not touched[symbol_id]:
+                    touched[symbol_id] = True
+                    touched_symbols[touched_count] = symbol_id
+                    touched_count += 1
 
-        turnover = 0.0
-        for i in range(touched_count):
-            symbol_id = touched_symbols[i]
-            touched[symbol_id] = False
-            turnover += abs(curr_weights[symbol_id] - marktomarket_weights[symbol_id])
+            turnover = 0.0
+            for i in range(touched_count):
+                symbol_id = touched_symbols[i]
+                touched[symbol_id] = False
+                turnover += abs(curr_weights[symbol_id] - marktomarket_weights[symbol_id])
 
-        turnover *= 0.5
+            turnover *= 0.5
+        else:
+            turnover = 0.0
 
-        # Step 3: 成本扣除 + weights → shares 同步 (L802-826)
+        # Step 3: 成本扣除 + weights → shares 同步 (对齐 Reference L802-826)
+        # Reference 仅对 tradable_mask 股票更新 shares，非 tradable 股票保持旧 shares。
+        # 生产引擎对齐此行为：只有 vwap 有效且非涨跌停的股票才同步 shares，
+        # 不可交易股票（涨跌停/零换手）保持旧 shares，避免强制重设导致的
+        # marktomarket_weights 偏差累积。
         transaction_cost = 0.0
         if has_signal and has_ranked_signal:
             transaction_cost = portfolio_value * 2.0 * turnover * cost_per_turnover
             portfolio_value -= transaction_cost
-            # 同步 weights → shares (portfolio_sign 保证 shares 符号正确)
+            # 同步 weights → shares（仅可交易股票）
             if abs(portfolio_value) > eps:
                 for i in range(held_count):
                     symbol_id = held_symbols[i]
                     row_idx = current_row[symbol_id]
                     if row_idx == -1:
+                        continue
+                    # 对齐 Reference tradable_mask: vwap 有效且可交易
+                    if not tradable[row_idx]:
                         continue
                     v = vwap15[row_idx]
                     if v > 0:
