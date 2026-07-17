@@ -586,7 +586,23 @@ def _simulate_portfolio_core_15min(
             for i in range(touched_count):
                 symbol_id = touched_symbols[i]
                 touched[symbol_id] = False
-                turnover += abs(curr_weights[symbol_id] - marktomarket_weights[symbol_id])
+                # 对齐 Reference effective_target 的 where 逻辑:
+                # 非 tradable 股票保持盯市权重，避免因价格漂移或零成交
+                # 导致的虚假 turnover（curr_weights ≠ marktomarket_weights
+                # 但实际无法交易）。
+                # Reference: effective_target = where(tradable_mask, constrained_target, current_weights_np)
+                # tradable_mask = isfinite(vwap) & (vwap > 0)
+                row_idx = current_row[symbol_id]
+                if row_idx != -1:
+                    v = vwap15[row_idx]
+                    is_tradable_mask = np.isfinite(v) and v > 0.0
+                else:
+                    is_tradable_mask = False
+                if is_tradable_mask:
+                    cw = curr_weights[symbol_id]
+                else:
+                    cw = marktomarket_weights[symbol_id]
+                turnover += abs(cw - marktomarket_weights[symbol_id])
 
             turnover *= 0.5
         else:
