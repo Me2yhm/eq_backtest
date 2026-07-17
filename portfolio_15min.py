@@ -609,26 +609,26 @@ def _simulate_portfolio_core_15min(
             turnover = 0.0
 
         # Step 3: 成本扣除 + weights → shares 同步 (对齐 Reference L802-826)
-        # Reference 仅对 tradable_mask 股票更新 shares，非 tradable 股票保持旧 shares。
-        # 生产引擎对齐此行为：只有 vwap 有效且非涨跌停的股票才同步 shares，
-        # 不可交易股票（涨跌停/零换手）保持旧 shares，避免强制重设导致的
-        # marktomarket_weights 偏差累积。
+        # Reference: tradable_mask = isfinite(vwap) & (vwap > 0)，仅 vwap 有效性约束
+        # 生产引擎对齐此行为：vwap 有效（>0 且有限）即同步 shares，
+        # 涨跌停但 vwap>0 的股票也更新 shares，避免 shares 陈旧导致
+        # marktomarket_weights 偏离 Reference。
         transaction_cost = 0.0
         if has_signal and has_ranked_signal:
             transaction_cost = portfolio_value * 2.0 * turnover * cost_per_turnover
             portfolio_value -= transaction_cost
-            # 同步 weights → shares（仅可交易股票）
+            # 同步 weights → shares（对齐 Reference tradable_mask: vwap 有效即可）
+            # Reference: tradable_mask = isfinite(vwap) & (vwap > 0)
+            # 生产引擎原用 tradable（严格：排除涨跌停+零成交），导致涨跌停股票
+            # shares 不更新，累积偏差使 marktomarket_weights 偏离 Reference。
             if abs(portfolio_value) > eps:
                 for i in range(held_count):
                     symbol_id = held_symbols[i]
                     row_idx = current_row[symbol_id]
                     if row_idx == -1:
                         continue
-                    # 对齐 Reference tradable_mask: vwap 有效且可交易
-                    if not tradable[row_idx]:
-                        continue
                     v = vwap15[row_idx]
-                    if v > 0:
+                    if v > 0 and np.isfinite(v):
                         current_shares[symbol_id] = portfolio_sign * current_weights[symbol_id] * portfolio_value / v
             # 清仓股票 shares 归零
             for i in range(prev_count):
