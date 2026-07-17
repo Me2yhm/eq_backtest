@@ -239,12 +239,33 @@ def _dataset_from_frame(pool: pl.DataFrame, daily_snapshot_frame: pl.DataFrame) 
     # Compute close_prev and close_curr from actual close prices
     # close_prev = close of previous bar (shift +1 within each symbol)
     # close_curr = close of current bar
-    encoded = encoded.sort(["symbol", "datetime"]).with_columns([
-        pl.col("close").shift(1).over("symbol").alias("close_prev"),
+    #
+    # 对齐 Reference 引擎：检测"symbol 在全局前一 bar 缺失"的 gap。
+    # 此前 shift(1).over("symbol") 取到的是该 symbol 上次出现的 close（可能
+    # 间隔多 bar），Reference 用矩阵 close_np[row_idx-1] 取严格前一 bar，
+    # 缺失 symbol 为 NaN → prev_pnl 跳过。
+    # 修复：若 symbol 不在全局前一 bar 出现，close_prev=0 → prev_pnl 跳过。
+    encoded = encoded.sort(["symbol", "datetime"])
+    encoded = encoded.with_columns([
+        pl.col("close").shift(1).over("symbol").alias("close_prev_raw"),
+        pl.col("datetime").shift(1).over("symbol").alias("prev_symbol_dt"),
         pl.col("close").alias("close_curr"),
     ])
-    # Fill null close_prev (first bar per symbol) with open as fallback
-    encoded = encoded.with_columns(pl.col("close_prev").fill_null(pl.col("open")))
+    # 构建全局 bar 序列: datetime → 前一 bar datetime
+    all_dts = encoded["datetime"].unique().sort()
+    dt_to_prev = {all_dts[i]: all_dts[i - 1] for i in range(1, len(all_dts))}
+    encoded = encoded.with_columns(
+        pl.col("datetime").replace_strict(dt_to_prev, default=None).alias("expected_prev_dt")
+    )
+    # gap: 该 bar 是首 bar，或 symbol 不在全局前一 bar 中出现
+    encoded = encoded.with_columns(
+        pl.when(
+            pl.col("expected_prev_dt").is_null() |
+            (pl.col("prev_symbol_dt") != pl.col("expected_prev_dt"))
+        ).then(0.0)
+        .otherwise(pl.col("close_prev_raw"))
+        .alias("close_prev")
+    )
     # Re-sort to original order (by datetime, symbol)
     encoded = encoded.sort(["datetime", "symbol"])
 
