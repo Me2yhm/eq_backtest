@@ -259,10 +259,9 @@ def _dataset_from_frame(pool: pl.DataFrame, daily_snapshot_frame: pl.DataFrame) 
     )
     # gap: 该 bar 是首 bar，或 symbol 不在全局前一 bar 中出现
     encoded = encoded.with_columns(
-        pl.when(
-            pl.col("expected_prev_dt").is_null() |
-            (pl.col("prev_symbol_dt") != pl.col("expected_prev_dt"))
-        ).then(0.0)
+        pl
+        .when(pl.col("expected_prev_dt").is_null() | (pl.col("prev_symbol_dt") != pl.col("expected_prev_dt")))
+        .then(0.0)
         .otherwise(pl.col("close_prev_raw"))
         .alias("close_prev")
     )
