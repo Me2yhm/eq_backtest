@@ -582,7 +582,11 @@ def _simulate_portfolio_core_15min(
                     touched_symbols[touched_count] = symbol_id
                     touched_count += 1
 
-            turnover = 0.0
+            # 收集 touched_symbols 的 (effective_target, marktomarket) 对到临时数组
+            # 用 np.abs(...).sum() 对齐 Reference 的 pairwise summation，
+            # 消除逐 symbol 浮点累加顺序差异导致的自放大 PV 偏移。
+            touched_eff = np.empty(touched_count, dtype=np.float64)
+            touched_mtm = np.empty(touched_count, dtype=np.float64)
             for i in range(touched_count):
                 symbol_id = touched_symbols[i]
                 touched[symbol_id] = False
@@ -599,12 +603,13 @@ def _simulate_portfolio_core_15min(
                 else:
                     is_tradable_mask = False
                 if is_tradable_mask:
-                    cw = curr_weights[symbol_id]
+                    touched_eff[i] = curr_weights[symbol_id]
                 else:
-                    cw = marktomarket_weights[symbol_id]
-                turnover += abs(cw - marktomarket_weights[symbol_id])
+                    touched_eff[i] = marktomarket_weights[symbol_id]
+                touched_mtm[i] = marktomarket_weights[symbol_id]
 
-            turnover *= 0.5
+            diff_arr = np.abs(touched_eff - touched_mtm)
+            turnover = np.sum(diff_arr) * 0.5
         else:
             turnover = 0.0
 
