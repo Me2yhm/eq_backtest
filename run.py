@@ -16,7 +16,6 @@ from loguru import logger
 
 import config as cfg
 from data_loader import build_pool
-from data_loader_15min import build_pool_15min
 from metrics import holding_period_stats, portfolio_metrics
 from plotting import (
     plot_holding_periods,
@@ -24,7 +23,6 @@ from plotting import (
     plot_portfolio_results,
 )
 from portfolio import generate_portfolio
-from portfolio_15min import generate_portfolio_15min
 
 # ── Return computation ─────────────────────────────────────────────────────────
 
@@ -65,25 +63,25 @@ def compute_returns(
     return excess, turnover
 
 
-def daily_returns_from_15min(returns_15min: pd.Series, agg_mode: str = "simple") -> pd.Series:
-    """Aggregate 15-minute returns to daily returns.
+def daily_returns_from_intraday(returns_intraday: pd.Series, agg_mode: str = "simple") -> pd.Series:
+    """Aggregate intraday returns to daily returns.
 
     agg_mode: "simple" = sum(bar_ret), "compound" = (1+x).prod()-1
     """
-    if returns_15min.empty:
-        return returns_15min
-    grouped = returns_15min.groupby(returns_15min.index.normalize())
+    if returns_intraday.empty:
+        return returns_intraday
+    grouped = returns_intraday.groupby(returns_intraday.index.normalize())
     if agg_mode == "compound":
-        return grouped.apply(lambda x: (1.0 + x).prod() - 1.0).rename(returns_15min.name)
+        return grouped.apply(lambda x: (1.0 + x).prod() - 1.0).rename(returns_intraday.name)
     else:
-        return grouped.sum().rename(returns_15min.name)
+        return grouped.sum().rename(returns_intraday.name)
 
 
-def daily_sum_from_15min(series_15min: pd.Series, name: str) -> pd.Series:
-    """Aggregate additive 15-minute series (e.g. turnover, close counts) to daily sums."""
-    if series_15min.empty:
-        return series_15min.rename(name)
-    return series_15min.groupby(series_15min.index.normalize()).sum().rename(name)
+def daily_sum_from_intraday(series_intraday: pd.Series, name: str) -> pd.Series:
+    """Aggregate additive intraday series (e.g. turnover, close counts) to daily sums."""
+    if series_intraday.empty:
+        return series_intraday.rename(name)
+    return series_intraday.groupby(series_intraday.index.normalize()).sum().rename(name)
 
 
 def _align_benchmark_to_index(bm_ret: pd.Series, index: pd.Index) -> pd.Series:
@@ -106,12 +104,6 @@ def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
     # frame.write_csv(output_path)
 
 
-def _write_target_weights(target_weights: pd.DataFrame, csv_path: str, parquet_path: str) -> None:
-    frame = pl.from_pandas(target_weights.reset_index())
-    frame.write_csv(csv_path)
-    frame.write_parquet(parquet_path)
-
-
 def _build_portfolio_pnl_frame(
     portfolio_returns: pd.Series,
     cost_turnover: pd.Series,
@@ -128,7 +120,7 @@ def _build_portfolio_pnl_frame(
     if deduct_cost:
         daily_strategy = portfolio_returns.sub(cost_turnover.mul(cost)).rename("daily_strategy")
     else:
-        # 15min 模式: 引擎已扣成本，直接用 portfolio_returns
+        # Retained for callers that pass already-net returns.
         daily_strategy = portfolio_returns.rename("daily_strategy")
     daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
     daily_alpha = daily_alpha.rename("daily_alpha")
@@ -189,33 +181,17 @@ def run() -> None:
     output_dir = str(cfg.OUTPUT_DIR) + os.sep
 
     # ── Load data ─────────────────────────────────────────────────────────────
-    if cfg.USE_15MIN:
-        pool, bm_ret = build_pool_15min(
-            data_15min_path=cfg.DATA_15MIN_PATH,
-            preds_15min_dir=cfg.PREDS_15MIN_DIR,
-            daily_data_path=cfg.DATA_PATH,
-            bm_path=cfg.BM_PATH,
-            horizons_15min=cfg.HORIZONS_15MIN,
-            start=cfg.START,
-            end=cfg.END,
-            universe=cfg.UNIVERSE,
-            allow_st_open=cfg.ALLOW_ST_OPEN,
-            nosuspend_days=cfg.NOSUSPEND_DAYS,
-        )
-    else:
-        pool, bm_ret = build_pool(
-            data_path=cfg.DATA_PATH,
-            preds_dir=cfg.PREDS_DIR,
-            bm_path=cfg.BM_PATH,
-            horizons=cfg.HORIZONS,
-            start=cfg.START,
-            end=cfg.END,
-            universe=cfg.UNIVERSE,
-            allow_st_open=cfg.ALLOW_ST_OPEN,
-            use_cache=cfg.USE_POOL_CACHE,
-            cache_dir=cfg.POOL_CACHE_DIR,
-            nosuspend_days=cfg.NOSUSPEND_DAYS,
-        )
+    pool, bm_ret = build_pool(
+        freq_cfg=cfg.FREQ_CONFIG[cfg.FREQUENCY],
+        bm_path=cfg.BM_PATH,
+        start=cfg.START,
+        end=cfg.END,
+        universe=cfg.UNIVERSE,
+        allow_st_open=cfg.ALLOW_ST_OPEN,
+        use_cache=cfg.USE_POOL_CACHE,
+        cache_dir=cfg.POOL_CACHE_DIR,
+        nosuspend_days=cfg.NOSUSPEND_DAYS,
+    )
 
     # ── Run for each portfolio size ───────────────────────────────────────────
     all_metrics = {}
@@ -227,53 +203,31 @@ def run() -> None:
     for port_size in cfg.PORT_SIZES:
         logger.info("── Portfolio size: {} ──", port_size)
 
-        if cfg.USE_15MIN:
-            result = generate_portfolio_15min(
-                pool=pool,
-                port_size=port_size,
-                thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
-                size_cut=cfg.POOL_SIZE,
-                close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
-                trade_on_next_bar=cfg.TRADE_ON_NEXT_BAR,
-                strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
-                is_short=cfg.IS_SHORT,
-                output_dir=output_dir,
-                record_target_weights=True,
-                debug_mode=cfg.DEBUG_15MIN,
-                debug_symbol=cfg.DEBUG_SYMBOL_15MIN,
-                debug_datetime=cfg.DEBUG_DATETIME_15MIN,
-                cost_per_turnover=cfg.COST_PER_TURNOVER,
-            )
-        else:
-            result = generate_portfolio(
-                pool=pool,
-                port_size=port_size,
-                thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
-                size_cut=cfg.POOL_SIZE,
-                close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
-                trade_on_next_day=cfg.TRADE_ON_NEXT_DAY,
-                strict_first_day_top_n=cfg.STRICT_FIRST_DAY_TOP_N,
-                is_short=cfg.IS_SHORT,
-                output_dir=output_dir,
-            )
+        result = generate_portfolio(
+            pool=pool,
+            port_size=port_size,
+            thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
+            size_cut=cfg.POOL_SIZE,
+            close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
+            trade_on_next_bar=cfg.TRADE_ON_NEXT_BAR,
+            strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
+            is_short=cfg.IS_SHORT,
+            output_dir=output_dir,
+            debug_mode=cfg.DEBUG,
+            debug_symbol=cfg.DEBUG_SYMBOL,
+            debug_datetime=cfg.DEBUG_DATETIME,
+        )
 
         positions = result.positions
         close_counts = result.close_counts
         _write_positions_csv(positions, f"{output_dir}positions_{port_size}.csv")
-        if cfg.USE_15MIN and result.target_weights is not None:
-            _write_target_weights(
-                result.target_weights,
-                f"{output_dir}target_weights_{port_size}.csv",
-                f"{output_dir}target_weights_{port_size}.parquet",
-            )
-
-        use_15min = cfg.USE_15MIN
-        if use_15min:
-            portfolio_returns_eval = daily_returns_from_15min(result.portfolio_returns, agg_mode=cfg.AGG_MODE)
-            cost_turnover_eval = daily_sum_from_15min(result.cost_turnover, "cost_turnover")
-            turnover_eval = daily_sum_from_15min(result.turnover, "turnover")
+        is_intraday = cfg.FREQUENCY != "daily"
+        if is_intraday:
+            portfolio_returns_eval = daily_returns_from_intraday(result.portfolio_returns, agg_mode=cfg.AGG_MODE)
+            cost_turnover_eval = daily_sum_from_intraday(result.cost_turnover, "cost_turnover")
+            turnover_eval = daily_sum_from_intraday(result.turnover, "turnover")
             close_counts_eval = pd.DataFrame({
-                "n_closed": daily_sum_from_15min(close_counts["n_closed"], "n_closed").astype(int)
+                "n_closed": daily_sum_from_intraday(close_counts["n_closed"], "n_closed").astype(int)
             })
         else:
             portfolio_returns_eval = result.portfolio_returns
@@ -281,8 +235,8 @@ def run() -> None:
             turnover_eval = result.turnover
             close_counts_eval = close_counts
 
-        # 15min 模式: 引擎已扣成本; 日级模式: 仍需日级扣成本
-        deduct_cost = not use_15min
+        # The common engine always reports gross P&L and separate one-way turnover.
+        deduct_cost = True
         excess, turnover = compute_returns(
             portfolio_returns_eval,
             cost_turnover_eval,
