@@ -7,7 +7,7 @@ START = "2019-01-02"
 END = "2026-01-01"
 
 # ── Frequency ─────────────────────────────────────────────────────────────────
-FREQUENCY = "15min"
+FREQUENCY = "5min"
 FREQ_CONFIG = {
     "daily": {
         "market_data": Path("/ext/eq_data/daily_with_limit_prevcap.pqt"),
@@ -58,7 +58,8 @@ else:
     PORT_SIZES = [800]
 
 THRESH_OUT_BUFFER = 600
-TRADE_ON_NEXT_BAR = True
+# Keep the merged 15min baseline's same-bar execution convention.
+TRADE_ON_NEXT_BAR = False
 STRICT_FIRST_BAR_TOP_N = False
 CLOSE_ON_SIZE_DROP = False
 
