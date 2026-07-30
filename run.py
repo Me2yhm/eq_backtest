@@ -33,15 +33,13 @@ def compute_returns(
     turnover: pd.Series,
     bm_ret: pd.Series,
     is_short: bool,
-    cost: float,
     exclude_period: tuple | None,
-    deduct_cost: bool = True,
 ) -> tuple:
     """
     Compute daily excess returns and one-way turnover for a single portfolio.
 
     Excess return = benchmark - portfolio (short) or portfolio - benchmark (long),
-    minus transaction cost (only when deduct_cost=True; 15min 模式引擎已扣成本).
+    Transaction costs are already deducted by the share-based simulator.
 
     Returns
     -------
@@ -50,8 +48,6 @@ def compute_returns(
     """
     bm_aligned = bm_ret.reindex(portfolio_returns.index)
     excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
-    if deduct_cost:
-        excess -= cost_turnover.mul(cost)
 
     # exclude_period: 删除行 (对齐 evaluation/metrics.py L252-259 _apply_metric_filters)
     # 旧口径: 置零 (excess.loc[...] = 0.0)
@@ -104,6 +100,12 @@ def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
     # frame.write_csv(output_path)
 
 
+def _write_target_weights(target_weights: pd.DataFrame, csv_path: str, parquet_path: str) -> None:
+    frame = pl.from_pandas(target_weights.reset_index())
+    frame.write_csv(csv_path)
+    frame.write_parquet(parquet_path)
+
+
 def _build_portfolio_pnl_frame(
     portfolio_returns: pd.Series,
     cost_turnover: pd.Series,
@@ -111,17 +113,11 @@ def _build_portfolio_pnl_frame(
     bm_ret: pd.Series,
     close_counts: pd.DataFrame,
     is_short: bool,
-    cost: float,
     exclude_period: tuple | None,
-    deduct_cost: bool = True,
 ) -> pd.DataFrame:
     daily_benchmark = _align_benchmark_to_index(bm_ret, portfolio_returns.index).fillna(0.0).rename("daily_benchmark")
     daily_tto = turnover.rename("daily_tto").copy()
-    if deduct_cost:
-        daily_strategy = portfolio_returns.sub(cost_turnover.mul(cost)).rename("daily_strategy")
-    else:
-        # Retained for callers that pass already-net returns.
-        daily_strategy = portfolio_returns.rename("daily_strategy")
+    daily_strategy = portfolio_returns.rename("daily_strategy")
     daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
     daily_alpha = daily_alpha.rename("daily_alpha")
 
@@ -213,14 +209,23 @@ def run() -> None:
             strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
             is_short=cfg.IS_SHORT,
             output_dir=output_dir,
+            record_target_weights=cfg.FREQUENCY != "daily",
             debug_mode=cfg.DEBUG,
             debug_symbol=cfg.DEBUG_SYMBOL,
             debug_datetime=cfg.DEBUG_DATETIME,
+            cost_per_turnover=cfg.COST_PER_TURNOVER,
+            portfolio_initial_value=cfg.PORTFOLIO_INITIAL_VALUE,
         )
 
         positions = result.positions
         close_counts = result.close_counts
         _write_positions_csv(positions, f"{output_dir}positions_{port_size}.csv")
+        if result.target_weights is not None:
+            _write_target_weights(
+                result.target_weights,
+                f"{output_dir}target_weights_{port_size}.csv",
+                f"{output_dir}target_weights_{port_size}.parquet",
+            )
         is_intraday = cfg.FREQUENCY != "daily"
         if is_intraday:
             portfolio_returns_eval = daily_returns_from_intraday(result.portfolio_returns, agg_mode=cfg.AGG_MODE)
@@ -235,17 +240,13 @@ def run() -> None:
             turnover_eval = result.turnover
             close_counts_eval = close_counts
 
-        # The common engine always reports gross P&L and separate one-way turnover.
-        deduct_cost = True
         excess, turnover = compute_returns(
             portfolio_returns_eval,
             cost_turnover_eval,
             turnover_eval,
             bm_ret,
             is_short=cfg.IS_SHORT,
-            cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
-            deduct_cost=deduct_cost,
         )
         portfolio_pnl = _build_portfolio_pnl_frame(
             portfolio_returns=portfolio_returns_eval,
@@ -254,9 +255,7 @@ def run() -> None:
             bm_ret=bm_ret,
             close_counts=close_counts_eval,
             is_short=cfg.IS_SHORT,
-            cost=cfg.COST_PER_TURNOVER,
             exclude_period=cfg.EXCLUDE_PERIOD,
-            deduct_cost=deduct_cost,
         )
         portfolio_pnl.to_csv(
             f"{output_dir}portfolio_pnl_{port_size}.csv",

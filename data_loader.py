@@ -13,7 +13,7 @@ import pandas as pd
 import polars as pl
 from loguru import logger
 
-POOL_CACHE_VERSION = 4
+POOL_CACHE_VERSION = 6
 _BASE_COLUMNS = {
     "datetime",
     "date",
@@ -35,6 +35,10 @@ _BASE_COLUMNS = {
     "can_open_base",
     "can_trade_buy",
     "can_trade_sell",
+    "vwap_ret",
+    "execution_vwap",
+    "prev_close",
+    "bar_close",
     "row_idx",
     "symbol_id",
 }
@@ -45,11 +49,16 @@ class BacktestDataset:
     """Array-backed input shared by daily and intraday simulation."""
 
     pool_frame: pl.DataFrame
+    daily_snapshot_frame: pl.DataFrame
     bars: np.ndarray
     symbols: np.ndarray
     bar_offsets: np.ndarray
+    bar_session_index: np.ndarray
     row_symbol_ids: np.ndarray
-    ret: np.ndarray
+    vwap_ret: np.ndarray
+    prev_close: np.ndarray
+    bar_close: np.ndarray
+    execution_vwap: np.ndarray
     pred: np.ndarray
     size_rank: np.ndarray
     tradable: np.ndarray
@@ -261,6 +270,13 @@ def load_market_data_daily(
         frame
         .with_columns(
             pl.col("date").cast(pl.Datetime).alias("datetime"),
+            pl.col("ret").alias("vwap_ret"),
+            # Daily bars have no execution-price decomposition.  A unit VWAP
+            # and close=1+ret preserves the daily weight-return P&L in the
+            # common share-based simulator.
+            pl.lit(1.0).alias("execution_vwap"),
+            pl.lit(1.0).alias("prev_close"),
+            (pl.lit(1.0) + pl.col("ret")).alias("bar_close"),
             can_trade_buy=can_buy,
             can_trade_sell=can_sell,
             can_open_base=can_open_base,
@@ -293,14 +309,19 @@ def load_daily_flags(
         frame = frame.filter(pl.col("date") <= pl.lit(date.fromisoformat(end)))
     base = _can_open_base_expr(universe, allow_st_open, nosuspend_days)
     rank_scope = _can_open_base_expr(universe, False, nosuspend_days)
-    ranked = frame.with_columns(
-        base.alias("can_open_base"),
-        pl
-        .when(rank_scope)
-        .then(pl.col("log_size").rank(descending=True).over("date"))
-        .otherwise(999999)
-        .cast(pl.Int32)
-        .alias("size_rank"),
+    base_frame = frame.with_columns(base.alias("can_open_base"))
+    # Rank only the eligible universe.  Applying rank before masking ineligible
+    # rows changes every remaining rank and breaks the reference portfolio.
+    eligible_ranked = (
+        base_frame.filter(rank_scope)
+        .select(["date", "symbol", "log_size"])
+        .with_columns(pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank"))
+        .select(["date", "symbol", "size_rank"])
+    )
+    ranked = (
+        base_frame.drop("size_rank")
+        .join(eligible_ranked, on=["date", "symbol"], how="left")
+        .with_columns(pl.col("size_rank").fill_null(999999).cast(pl.Int32))
     )
     keep = [
         column
@@ -324,7 +345,7 @@ def load_daily_flags(
 
 
 def load_market_data_intraday(freq_cfg: dict, start: str, end: str | None) -> pl.DataFrame:
-    """Read a 15-minute or 5-minute parquet into the common, flag-free schema."""
+    """Read any intraday parquet into the common, flag-free schema."""
     path = Path(freq_cfg["market_data"])
     schema = pl.read_parquet_schema(path)
     symbol_column = "symbol" if "symbol" in schema else "stock_code" if "stock_code" in schema else None
@@ -333,14 +354,21 @@ def load_market_data_intraday(freq_cfg: dict, start: str, end: str | None) -> pl
     missing = {"datetime", "turnover", "vwap_ret"}.difference(schema)
     if missing:
         raise ValueError(f"Intraday market parquet is missing required columns: {sorted(missing)}")
-    price_column = next((column for column in ("vwap15", "vwap5", "vwap", "close") if column in schema), None)
+    source_columns = freq_cfg.get("market_columns", {})
+    price_column = source_columns.get("execution_vwap") or next(
+        (column for column in ("vwap15", "vwap5", "vwap", "close") if column in schema), None
+    )
+    close_column = source_columns.get("bar_close", "close")
     if price_column is None:
-        raise ValueError("Intraday market parquet needs one of vwap15, vwap5, vwap, or close for limit checks")
+        raise ValueError("Intraday market parquet needs an execution VWAP source column for limit checks")
+    if close_column not in schema:
+        raise ValueError(f"Intraday market parquet is missing configured bar close column '{close_column}'")
     frame = pl.scan_parquet(path).select([
         pl.col("datetime"),
         pl.col(symbol_column).alias("symbol"),
         pl.col("turnover"),
         pl.col("vwap_ret"),
+        pl.col(close_column).alias("bar_close"),
         pl.col(price_column),
     ])
     if schema["datetime"] == pl.String:
@@ -355,6 +383,7 @@ def load_market_data_intraday(freq_cfg: dict, start: str, end: str | None) -> pl
         .with_columns(
             pl.col("datetime").dt.date().alias("date"),
             pl.col("vwap_ret").alias("ret"),
+            pl.col(price_column).alias("execution_vwap"),
             pl.col(price_column).alias("execution_price"),
         )
         .collect()
@@ -371,13 +400,29 @@ def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
     counts = bar_counts["len"].to_numpy().astype(np.int64, copy=False)
     offsets = np.empty(len(counts) + 1, dtype=np.int64)
     offsets[0], offsets[1:] = 0, np.cumsum(counts)
+    bars = bar_counts["datetime"].to_numpy()
+    bar_datetimes = pd.to_datetime(bars)
+    if (bar_datetimes == bar_datetimes.normalize()).all():
+        bar_session_index = np.arange(len(bars), dtype=np.int32)
+    else:
+        bar_session_half = (bar_datetimes.hour >= 12).astype(np.int32)
+        bar_date_session = bar_datetimes.normalize().astype("int64") // 10**9 * 10 + bar_session_half
+        bar_session_index = pd.factorize(bar_date_session)[0].astype(np.int32)
+    snapshot_columns = [
+        "date", "symbol", "log_size", "size_rank", "industry", "index", "listed_Satisfied", "is_ST", "normal_days",
+    ]
     return BacktestDataset(
         pool_frame=encoded,
-        bars=bar_counts["datetime"].to_numpy(),
+        daily_snapshot_frame=encoded.select(snapshot_columns).unique().sort(["date", "symbol"]),
+        bars=bars,
         symbols=np.asarray(symbol_table["symbol"].to_list(), dtype=object),
         bar_offsets=offsets,
+        bar_session_index=bar_session_index,
         row_symbol_ids=encoded["symbol_id"].to_numpy().astype(np.int32, copy=False),
-        ret=encoded["ret"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        vwap_ret=encoded["vwap_ret"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        prev_close=encoded["prev_close"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        bar_close=encoded["bar_close"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
+        execution_vwap=encoded["execution_vwap"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
         pred=encoded["pred"].fill_null(float("nan")).to_numpy().astype(np.float64, copy=False),
         size_rank=encoded["size_rank"].fill_null(999999).to_numpy().astype(np.int32, copy=False),
         tradable=encoded["tradable"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
@@ -388,10 +433,28 @@ def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
     )
 
 
-def _encode_dataset(pool: pl.DataFrame) -> BacktestDataset:
+def _encode_dataset(pool: pl.DataFrame, derive_prev_close: bool = False) -> BacktestDataset:
     symbols = pool["symbol"].unique().sort().to_list()
     symbol_map = pl.DataFrame({"symbol": symbols}).with_row_index("symbol_id")
-    return _dataset_from_encoded_frame(pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx"))
+    encoded = pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx")
+    # The previous close is valid only if the symbol exists in the globally
+    # previous bar; a symbol-level shift alone bridges suspension gaps.
+    if derive_prev_close:
+        encoded = encoded.sort(["symbol", "datetime"]).with_columns([
+            pl.col("bar_close").shift(1).over("symbol").alias("prev_close_raw"),
+            pl.col("datetime").shift(1).over("symbol").alias("prev_symbol_dt"),
+        ])
+        all_datetimes = encoded["datetime"].unique().sort()
+        previous_datetime = {all_datetimes[index]: all_datetimes[index - 1] for index in range(1, len(all_datetimes))}
+        encoded = encoded.with_columns(
+            pl.col("datetime").replace_strict(previous_datetime, default=None).alias("expected_prev_dt")
+        ).with_columns(
+            pl.when(pl.col("expected_prev_dt").is_null() | (pl.col("prev_symbol_dt") != pl.col("expected_prev_dt")))
+            .then(0.0)
+            .otherwise(pl.col("prev_close_raw"))
+            .alias("prev_close")
+        ).sort(["datetime", "symbol"])
+    return _dataset_from_encoded_frame(encoded)
 
 
 def _file_signature(path: Path) -> dict[str, int | str]:
@@ -445,7 +508,7 @@ def build_pool(
     cache_dir: Path | None = None,
     nosuspend_days: int = 10,
 ) -> tuple[BacktestDataset, pd.Series]:
-    """Build a canonical pool for daily, 15-minute, or 5-minute backtests."""
+    """Build a canonical pool for daily, intraday, or 5-minute backtests."""
     import config as cfg
 
     frequency = _frequency_name(freq_cfg)
@@ -495,7 +558,8 @@ def build_pool(
             )
         )
     dataset = _encode_dataset(
-        market.join(predictions, on=["datetime", "symbol"], how="left").sort(["datetime", "symbol"])
+        market.join(predictions, on=["datetime", "symbol"], how="left").sort(["datetime", "symbol"]),
+        derive_prev_close=frequency != "daily",
     )
     if use_cache:
         resolved_cache_dir.mkdir(parents=True, exist_ok=True)

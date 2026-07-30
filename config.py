@@ -13,16 +13,20 @@ FREQ_CONFIG = {
         "market_data": Path("/ext/eq_data/daily_with_limit_prevcap.pqt"),
         "preds_dir": Path("data/preds_size"),
         "horizons": ["3d", "5d", "10d"],
+        # This source exposes only bar return; its price path is derived in the loader.
+        "market_columns": {"execution_vwap": None, "bar_close": None},
     },
     "15min": {
         "market_data": Path("/ext/eq_data/15min_bar_full_left_close.parquet"),
         "preds_dir": Path("/ext/trq"),
         "horizons": ["predictions"],
+        "market_columns": {"execution_vwap": "vwap15", "bar_close": "close"},
     },
     "5min": {
         "market_data": Path("/ext/eq_data/5min_bar_full_left_close.parquet"),
         "preds_dir": Path("/tmp/eq_preds/output_mse/output_bs16/predictions"),
         "horizons": [""],
+        "market_columns": {"execution_vwap": "vwap5", "bar_close": "close"},
     },
 }
 if FREQUENCY not in FREQ_CONFIG:
@@ -62,6 +66,7 @@ CLOSE_ON_SIZE_DROP = False
 AGG_MODE = "simple"
 COMPOUNDING = False
 COST_PER_TURNOVER = 0.00045
+PORTFOLIO_INITIAL_VALUE = 1e8
 EXCLUDE_PERIOD = ("2024-01-01", "2024-03-31")
 
 # ── Debug ─────────────────────────────────────────────────────────────────────
