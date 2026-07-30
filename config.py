@@ -22,7 +22,7 @@ FREQ_CONFIG = {
     "5min": {
         "market_data": Path("/ext/eq_data/5min_bar_full_left_close.parquet"),
         "preds_dir": Path("/tmp/eq_preds/output_mse/output_bs16/predictions"),
-        "horizons": ["predictions"],
+        "horizons": [""],
     },
 }
 if FREQUENCY not in FREQ_CONFIG:
