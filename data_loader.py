@@ -1,17 +1,11 @@
-"""
-Data loading utilities.
-
-Public API
-----------
-build_pool(...)  ->  (BacktestDataset, benchmark Series)
-"""
+"""Frequency-independent market, prediction, and pool loading."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -19,424 +13,378 @@ import pandas as pd
 import polars as pl
 from loguru import logger
 
-MARKET_REQUIRED_COLUMNS = {
-    "symbol",
-    "date",
-    "turnover",
-    "log_size",
-    "size_rank",
-    "industry",
-    "index",
-    "ret",
-    "is_limit_up",
-    "is_limit_down",
-    "listed_Satisfied",
-    "is_ST",
-    "normal_days",
-    "vwap30ori",
-    "close_ex",
-    "vwap30",
-}
-
-POOL_CACHE_VERSION = 3
-CACHED_POOL_REQUIRED_COLUMNS = MARKET_REQUIRED_COLUMNS | {
-    "pred",
-    "tradable",
-    "can_open",
-    "can_trade_buy",
-    "can_trade_sell",
-    "can_open_base",
-    "row_idx",
-    "symbol_id",
+POOL_CACHE_VERSION = 4
+_BASE_COLUMNS = {
+    "datetime", "date", "symbol", "turnover", "log_size", "size_rank", "industry", "index", "ret",
+    "is_limit_up", "is_limit_down", "listed_Satisfied", "is_ST", "normal_days", "pred", "tradable",
+    "can_open", "can_open_base", "can_trade_buy", "can_trade_sell", "row_idx", "symbol_id",
 }
 
 
 @dataclass(slots=True)
 class BacktestDataset:
-    """Compact, array-backed market and prediction data for the simulator."""
+    """Array-backed input shared by daily and intraday simulation."""
 
     pool_frame: pl.DataFrame
-    dates: np.ndarray
+    bars: np.ndarray
     symbols: np.ndarray
-    day_offsets: np.ndarray
+    bar_offsets: np.ndarray
     row_symbol_ids: np.ndarray
     ret: np.ndarray
     pred: np.ndarray
     size_rank: np.ndarray
     tradable: np.ndarray
     can_open: np.ndarray
+    can_open_base: np.ndarray
     can_trade_buy: np.ndarray
     can_trade_sell: np.ndarray
-    can_open_base: np.ndarray
-    close_ex: np.ndarray
-    vwap30: np.ndarray
-    vwap30ori: np.ndarray
     sort_cache: dict[bool, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
 
 
-# ── Benchmark ─────────────────────────────────────────────────────────────────
-
-
 def load_benchmark(path: Path) -> pd.Series:
-    """Load a CSV of daily benchmark returns into a Series."""
     frame = pl.read_csv(path)
     if "date" not in frame.columns:
         frame = frame.with_columns(pl.col(frame.columns[0]).cast(pl.Date).alias("date"))
     elif frame["date"].dtype == pl.String:
         frame = frame.with_columns(pl.col("date").str.strptime(pl.Date, "%m/%d/%Y", strict=False))
-
-    result = frame.sort("date").to_pandas().set_index("date")["ret"].rename("ret")
-    return pd.Series(result)
+    return pd.Series(frame.sort("date").to_pandas().set_index("date")["ret"], name="ret")
 
 
 def load_external_benchmark(nav_path: Path) -> pd.Series:
-    """从外部 nav.parquet 提取日频 benchmark_return。
-
-    外部 nav.parquet 的 benchmark_return 是 bar 级（日内平坦，16 bar 相同值），
-    按日期取首个值即为日频 benchmark 收益。
-
-    诊断发现外部 benchmark 与本地 CSI 1000 存在系统性 0.9412 缩放因子
-    (ext_bm = 0.9412 × csi_ret, R²=0.9998)，直接使用外部数据可消除此差异。
-    """
     nav = pd.read_parquet(nav_path)
-    # benchmark_return 是日收益按 bar 均分（每 bar = 日收益 / bar 数），sum 得日收益
-    daily_bm = nav["benchmark_return"].groupby(nav.index.normalize()).sum()
-    daily_bm.index.name = "date"
-    daily_bm.name = "ret"
-    return daily_bm
+    result = nav["benchmark_return"].groupby(nav.index.normalize()).sum()
+    result.index.name, result.name = "date", "ret"
+    return result
 
 
-# ── Predictions ───────────────────────────────────────────────────────────────
+def _frequency_name(freq_cfg: dict) -> str:
+    """Resolve the configured frequency without duplicating it in every config item."""
+    market_path = Path(freq_cfg["market_data"])
+    name = market_path.name.lower()
+    if "15min" in name or "15m" in name:
+        return "15min"
+    if "5min" in name or "5m" in name:
+        return "5min"
+    return "daily"
 
 
-def _horizon_suffix(path: Path) -> str:
-    """Extract the horizon tag after the last underscore (e.g. '3d' from 'model_3d.parquet')."""
-    return path.stem.rsplit("_", 1)[-1] if "_" in path.stem else ""
+def _normalize_symbol_column(frame: pl.DataFrame) -> pl.DataFrame:
+    if "symbol" in frame.columns:
+        return frame
+    if "stock_code" in frame.columns:
+        return frame.rename({"stock_code": "symbol"})
+    raise ValueError("Input frame is missing 'symbol' (or legacy 'stock_code') column")
 
 
-def _prediction_files(preds_dir: Path, horizons: list) -> list[Path]:
-    files = sorted(f for f in preds_dir.glob("*.parquet") if _horizon_suffix(f) in horizons)
+def _prediction_files(preds_dir: Path, horizons: list[str]) -> list[Path]:
+    files = sorted(preds_dir.glob("*.parquet"))
     if not files:
-        raise FileNotFoundError(f"No parquet files matching horizons {horizons} found in '{preds_dir}'")
-    return files
+        raise FileNotFoundError(f"No parquet prediction files found in '{preds_dir}'")
+    selected = [
+        path for path in files
+        if any(horizon in path.stem or horizon.rstrip("s") in path.stem for horizon in horizons)
+    ]
+    if selected:
+        return selected
+    # Intraday producers commonly use a fixed filename, so a one-file directory is valid.
+    if len(files) == 1:
+        return files
+    raise FileNotFoundError(f"No prediction files in '{preds_dir}' match horizons {horizons}")
 
 
-def _normalize_prediction_dates(frame: pl.DataFrame) -> tuple[pl.DataFrame, str]:
+def _as_datetime(frame: pl.DataFrame, column: str) -> pl.DataFrame:
+    dtype = frame[column].dtype
+    if dtype == pl.String:
+        return frame.with_columns(pl.col(column).str.strptime(pl.Datetime, strict=False).alias(column))
+    return frame.with_columns(pl.col(column).cast(pl.Datetime).alias(column))
+
+
+def _filter_dates(frame: pl.DataFrame, datetime_column: str, start: str, end: str | None) -> pl.DataFrame:
+    start_date = date.fromisoformat(start)
+    out = frame.with_columns(pl.col(datetime_column).dt.date().alias("__date"))
+    out = out.filter(pl.col("__date") >= pl.lit(start_date))
+    if end:
+        out = out.filter(pl.col("__date") <= pl.lit(date.fromisoformat(end)))
+    return out.drop("__date")
+
+
+def _normalize_prediction_frame(frame: pl.DataFrame, frequency: str) -> pl.DataFrame:
+    columns = set(frame.columns)
+    if {"trade_date", "stock_code", "prediction"}.issubset(columns):
+        return _as_datetime(
+            frame.select(["trade_date", "stock_code", "prediction"]).rename(
+                {"trade_date": "datetime", "stock_code": "symbol", "prediction": "pred"}
+            ),
+            "datetime",
+        )
+    frame = _normalize_symbol_column(frame) if "symbol" not in frame.columns and "stock_code" in frame.columns else frame
+    columns = set(frame.columns)
+    if {"datetime", "symbol", "pred"}.issubset(columns):
+        return _as_datetime(frame.select(["datetime", "symbol", "pred"]), "datetime")
+    if {"datetime", "symbol", "prediction"}.issubset(columns):
+        return _as_datetime(frame.select(["datetime", "symbol", "prediction"]).rename({"prediction": "pred"}), "datetime")
     index_name = "__index_level_0__"
-    if index_name not in frame.columns:
-        raise ValueError("Prediction parquet is missing the pandas index column '__index_level_0__'")
-
-    if frame[index_name].dtype == pl.String:
-        frame = frame.with_columns(pl.col(index_name).str.strptime(pl.Date, strict=False))
-    else:
-        frame = frame.with_columns(pl.col(index_name).cast(pl.Date))
-    return frame, index_name
+    if index_name not in columns:
+        raise ValueError("Unsupported prediction schema; expected long [datetime, symbol, pred] or a wide pandas parquet")
+    wide = _as_datetime(frame, index_name)
+    return wide.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({index_name: "datetime"})
 
 
-class PredictionAlignmentError(ValueError):
-    pass
-
-
-def _load_predictions_long_form(files: list[Path], start: str, end: str | None = None) -> pl.DataFrame:
-    start_date = date.fromisoformat(start)
-    end_date = date.fromisoformat(end) if end else None
-    stacked: list[pl.DataFrame] = []
-    for file_path in files:
-        wide, index_name = _normalize_prediction_dates(pl.read_parquet(file_path))
-        filtered = wide.filter(pl.col(index_name) >= pl.lit(start_date))
-        if end_date is not None:
-            filtered = filtered.filter(pl.col(index_name) <= pl.lit(end_date))
-        long = filtered.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({
-            index_name: "date"
-        })
-        stacked.append(long)
-
+def load_predictions(freq_cfg: dict, start: str, end: str | None = None) -> pl.DataFrame:
+    """Load every frequency into the canonical ``[datetime, symbol, pred]`` form."""
+    frequency = _frequency_name(freq_cfg)
+    files = _prediction_files(Path(freq_cfg["preds_dir"]), list(freq_cfg["horizons"]))
+    frames = [_load_prediction_file(path, frequency, start, end) for path in files]
+    logger.info("{} predictions: {} file(s) loaded – {}", frequency, len(files), [path.name for path in files])
     return (
-        pl
-        .concat(stacked, how="vertical")
-        .group_by(["date", "symbol"], maintain_order=True)
+        pl.concat(frames, how="vertical_relaxed")
+        .group_by(["datetime", "symbol"], maintain_order=True)
         .agg(pl.col("pred").mean().alias("pred"))
-        .sort(["date", "symbol"])
+        .sort(["datetime", "symbol"])
     )
 
 
-def _load_predictions_wide_mean(files: list[Path], start: str, end: str | None = None) -> pl.DataFrame:
-    start_date = date.fromisoformat(start)
-    end_date = date.fromisoformat(end) if end else None
+def _load_prediction_file(path: Path, frequency: str, start: str, end: str | None) -> pl.DataFrame:
+    """Read only the requested date range from a long prediction parquet.
 
-    first, index_name = _normalize_prediction_dates(pl.read_parquet(files[0]))
-    first = first.filter(pl.col(index_name) >= pl.lit(start_date))
-    if end_date is not None:
-        first = first.filter(pl.col(index_name) <= pl.lit(end_date))
-    value_columns = [column for column in first.columns if column != index_name]
-    base_dates = first[index_name].to_numpy()
-    base_values = first.select(value_columns).to_numpy()
-    sums = np.nan_to_num(base_values, copy=True, nan=0.0)
-    counts = np.isfinite(base_values).astype(np.int16)
-
-    for file_path in files[1:]:
-        frame, current_index_name = _normalize_prediction_dates(pl.read_parquet(file_path))
-        frame = frame.filter(pl.col(current_index_name) >= pl.lit(start_date))
-        if end_date is not None:
-            frame = frame.filter(pl.col(current_index_name) <= pl.lit(end_date))
-
-        if frame.columns != first.columns:
-            raise PredictionAlignmentError("Prediction parquet schemas differ across horizons")
-
-        current_dates = frame[current_index_name].to_numpy()
-        if not np.array_equal(current_dates, base_dates):
-            raise PredictionAlignmentError("Prediction parquet date indexes differ across horizons")
-
-        values = frame.select(value_columns).to_numpy()
-        valid = np.isfinite(values)
-        sums += np.where(valid, values, 0.0)
-        counts += valid.astype(np.int16)
-
-    mean_values = np.divide(
-        sums,
-        counts,
-        out=np.full(sums.shape, np.nan, dtype=np.float64),
-        where=counts > 0,
-    )
-
-    averaged = pl.DataFrame(mean_values, schema=value_columns)
-    averaged.insert_column(0, pl.Series(index_name, base_dates))
-    return averaged.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({index_name: "date"})
-
-
-def load_predictions(preds_dir: Path, horizons: list, start: str, end: str | None = None) -> pl.DataFrame:
+    Wide daily matrices are intentionally handled by the established in-memory
+    route: predicate pushdown cannot remove their symbol columns.
     """
-    Load parquet prediction files matching the given horizon suffixes and average them.
-
-    Each parquet file must be a wide DataFrame (index=date, columns=symbol).
-    Returns a long Polars DataFrame with columns [date, symbol, pred].
-    """
-    files = _prediction_files(preds_dir, horizons)
-    logger.info("Predictions: {} file(s) loaded – {}", len(files), [f.name for f in files])
-
-    try:
-        return _load_predictions_wide_mean(files, start, end=end)
-    except PredictionAlignmentError:
-        return _load_predictions_long_form(files, start, end=end)
-
-
-def _validate_market_schema(path: Path) -> None:
     schema = pl.read_parquet_schema(path)
-    missing = sorted(MARKET_REQUIRED_COLUMNS.difference(schema))
-    if not missing:
-        return
+    columns = set(schema)
+    if {"trade_date", "stock_code", "prediction"}.issubset(columns):
+        lazy = pl.scan_parquet(path).select([
+            pl.col("trade_date").cast(pl.Datetime).alias("datetime"),
+            pl.col("stock_code").alias("symbol"),
+            pl.col("prediction").alias("pred"),
+        ])
+    elif {"datetime", "symbol", "pred"}.issubset(columns):
+        lazy = pl.scan_parquet(path).select([pl.col("datetime"), pl.col("symbol"), pl.col("pred")])
+    elif {"datetime", "symbol", "prediction"}.issubset(columns):
+        lazy = pl.scan_parquet(path).select([pl.col("datetime"), pl.col("symbol"), pl.col("prediction").alias("pred")])
+    else:
+        return _filter_dates(_normalize_prediction_frame(pl.read_parquet(path), frequency), "datetime", start, end)
 
-    columns = list(schema)
-    hint = ""
-    if "__index_level_0__" in schema and "date" not in schema and "symbol" not in schema:
-        hint = " The file looks like a wide prediction matrix; point data_path at long-form market data such as 'data/daily.pqt'."
+    datetime_dtype = lazy.collect_schema()["datetime"]
+    if datetime_dtype == pl.String:
+        lazy = lazy.with_columns(pl.col("datetime").str.strptime(pl.Datetime, strict=False))
+    else:
+        lazy = lazy.with_columns(pl.col("datetime").cast(pl.Datetime))
+    lower = datetime.fromisoformat(start)
+    lazy = lazy.filter(pl.col("datetime") >= pl.lit(lower))
+    if end:
+        lazy = lazy.filter(pl.col("datetime") < pl.lit(datetime.fromisoformat(end) + timedelta(days=1)))
+    return lazy.collect()
 
-    raise ValueError(
-        f"Market data parquet '{path}' is missing required columns {missing}. First columns: {columns[:10]}.{hint}"
+
+def _can_open_base_expr(universe: list[str] | None, allow_st_open: bool, nosuspend_days: int) -> pl.Expr:
+    expression = (pl.col("normal_days") >= nosuspend_days) & pl.col("listed_Satisfied").cast(pl.Boolean)
+    if not allow_st_open:
+        expression &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
+    if universe is not None:
+        expression &= pl.col("index").is_in(universe)
+    return expression
+
+
+def _validate_columns(frame: pl.DataFrame, required: set[str], context: str) -> None:
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"{context} is missing required columns: {missing}")
+
+
+def load_market_data_daily(
+    freq_cfg: dict, start: str, end: str | None, universe: list[str] | None, allow_st_open: bool, nosuspend_days: int = 10,
+) -> pl.DataFrame:
+    """Read daily bars and normalize them to the common market schema."""
+    frame = _normalize_symbol_column(pl.read_parquet(Path(freq_cfg["market_data"])))
+    _validate_columns(
+        frame,
+        {"date", "symbol", "turnover", "log_size", "size_rank", "industry", "index", "ret", "is_limit_up", "is_limit_down", "listed_Satisfied", "is_ST", "normal_days"},
+        "Daily market parquet",
+    )
+    if frame["date"].dtype == pl.String:
+        frame = frame.with_columns(pl.col("date").str.strptime(pl.Date, strict=False))
+    else:
+        frame = frame.with_columns(pl.col("date").cast(pl.Date))
+    start_date = date.fromisoformat(start)
+    frame = frame.filter(pl.col("date") >= pl.lit(start_date))
+    if end:
+        frame = frame.filter(pl.col("date") <= pl.lit(date.fromisoformat(end)))
+    can_buy = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").fill_null(False).cast(pl.Boolean)
+    can_sell = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").fill_null(False).cast(pl.Boolean)
+    can_open_base = _can_open_base_expr(universe, allow_st_open, nosuspend_days)
+    return (
+        frame.with_columns(
+            pl.col("date").cast(pl.Datetime).alias("datetime"),
+            can_trade_buy=can_buy,
+            can_trade_sell=can_sell,
+            can_open_base=can_open_base,
+        )
+        .with_columns(
+            tradable=(pl.col("can_trade_buy") & pl.col("can_trade_sell")),
+            can_open=(pl.col("can_trade_buy") & pl.col("can_trade_sell") & pl.col("can_open_base")),
+        )
+        .sort(["datetime", "symbol"])
     )
 
 
-# ── Market data ───────────────────────────────────────────────────────────────
-
-
-def load_market_data(
-    path: Path,
-    start: str,
-    end: str | None,
-    universe: list | None,
-    allow_st_open: bool,
-    nosuspend_days: int = 10,
+def load_daily_flags(
+    daily_path: Path, start: str, end: str | None, universe: list[str] | None, allow_st_open: bool, nosuspend_days: int,
 ) -> pl.DataFrame:
-    """
-    Load daily market data parquet and attach tradability flags.
-
-    Columns added
-    -------------
-    tradable      : has volume AND is not at either price limit
-    can_trade_buy : buy-side execution allowed on this day
-    can_trade_sell: sell-side execution allowed on this day
-    can_open      : symmetric open flag retained for diagnostics/backward compatibility
-    """
-    _validate_market_schema(path)
+    """Load daily eligibility/ranking constraints for broadcasting to intraday bars."""
+    frame = _normalize_symbol_column(pl.read_parquet(daily_path))
+    required = {"date", "symbol", "log_size", "industry", "index", "listed_Satisfied", "is_ST", "normal_days"}
+    _validate_columns(frame, required, "Daily constraints parquet")
+    if frame["date"].dtype == pl.String:
+        frame = frame.with_columns(pl.col("date").str.strptime(pl.Date, strict=False))
     start_date = date.fromisoformat(start)
-    end_date = date.fromisoformat(end) if end else None
-    can_trade_buy_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").cast(pl.Boolean)
-    can_trade_sell_expr = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").cast(pl.Boolean)
-    tradable_expr = can_trade_buy_expr & can_trade_sell_expr
-    can_open_base_expr = pl.col("normal_days") >= nosuspend_days
-    if not allow_st_open:
-        can_open_base_expr &= ~pl.col("is_ST").fill_null(0).cast(pl.Boolean)
-    if universe is not None:
-        can_open_base_expr &= pl.col("index").is_in(universe)
-
-    can_open_expr = tradable_expr & can_open_base_expr
-
-    frame = pl.read_parquet(path).filter(pl.col("date") >= pl.lit(start_date))
-    if end_date is not None:
-        frame = frame.filter(pl.col("date") <= pl.lit(end_date))
-
-    return frame.with_columns(
-        tradable=tradable_expr,
-        can_open=can_open_expr,
-        can_trade_buy=can_trade_buy_expr,
-        can_trade_sell=can_trade_sell_expr,
-        can_open_base=can_open_base_expr,
-    ).sort(["date", "symbol"])
+    frame = frame.filter(pl.col("date") >= pl.lit(start_date))
+    if end:
+        frame = frame.filter(pl.col("date") <= pl.lit(date.fromisoformat(end)))
+    base = _can_open_base_expr(universe, allow_st_open, nosuspend_days)
+    rank_scope = _can_open_base_expr(universe, False, nosuspend_days)
+    ranked = frame.with_columns(
+        base.alias("can_open_base"),
+        pl.when(rank_scope).then(pl.col("log_size").rank(descending=True).over("date")).otherwise(999999).cast(pl.Int32).alias("size_rank"),
+    )
+    keep = [column for column in ["date", "symbol", "log_size", "size_rank", "industry", "index", "listed_Satisfied", "is_ST", "normal_days", "can_open_base", "limit_up_price", "limit_down_price"] if column in ranked.columns]
+    return ranked.select(keep).sort(["date", "symbol"])
 
 
-# ── Combined entry point ───────────────────────────────────────────────────────
+def load_market_data_intraday(freq_cfg: dict, start: str, end: str | None) -> pl.DataFrame:
+    """Read a 15-minute or 5-minute parquet into the common, flag-free schema."""
+    path = Path(freq_cfg["market_data"])
+    schema = pl.read_parquet_schema(path)
+    symbol_column = "symbol" if "symbol" in schema else "stock_code" if "stock_code" in schema else None
+    if symbol_column is None:
+        raise ValueError("Intraday market parquet is missing 'symbol' (or legacy 'stock_code')")
+    missing = {"datetime", "turnover", "vwap_ret"}.difference(schema)
+    if missing:
+        raise ValueError(f"Intraday market parquet is missing required columns: {sorted(missing)}")
+    price_column = next((column for column in ("vwap15", "vwap5", "vwap", "close") if column in schema), None)
+    if price_column is None:
+        raise ValueError("Intraday market parquet needs one of vwap15, vwap5, vwap, or close for limit checks")
+    frame = pl.scan_parquet(path).select([
+        pl.col("datetime"), pl.col(symbol_column).alias("symbol"), pl.col("turnover"), pl.col("vwap_ret"), pl.col(price_column),
+    ])
+    if schema["datetime"] == pl.String:
+        frame = frame.with_columns(pl.col("datetime").str.strptime(pl.Datetime, strict=False))
+    else:
+        frame = frame.with_columns(pl.col("datetime").cast(pl.Datetime))
+    frame = frame.filter(pl.col("datetime") >= pl.lit(datetime.fromisoformat(start)))
+    if end:
+        frame = frame.filter(pl.col("datetime") < pl.lit(datetime.fromisoformat(end) + timedelta(days=1)))
+    return (
+        frame.with_columns(
+            pl.col("datetime").dt.date().alias("date"), pl.col("vwap_ret").alias("ret"), pl.col(price_column).alias("execution_price")
+        )
+        .collect()
+        .sort(["datetime", "symbol"])
+    )
 
 
 def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
-    missing = sorted(CACHED_POOL_REQUIRED_COLUMNS.difference(encoded.columns))
+    missing = sorted(_BASE_COLUMNS.difference(encoded.columns))
     if missing:
-        raise ValueError(f"Cached pool frame is missing required columns {missing}")
-
-    symbol_table = encoded.select(["symbol_id", "symbol"]).unique(maintain_order=True).sort("symbol_id")
-    symbol_values = symbol_table["symbol"].to_list()
-
-    date_counts = encoded.group_by("date", maintain_order=True).len()
-    dates = date_counts["date"].to_numpy()
-    counts = date_counts["len"].to_numpy().astype(np.int64, copy=False)
-
-    day_offsets = np.empty(len(counts) + 1, dtype=np.int64)
-    day_offsets[0] = 0
-    day_offsets[1:] = np.cumsum(counts)
-
+        raise ValueError(f"Pool frame is missing canonical columns: {missing}")
+    symbol_table = encoded.select(["symbol_id", "symbol"]).unique().sort("symbol_id")
+    bar_counts = encoded.group_by("datetime", maintain_order=True).len().sort("datetime")
+    counts = bar_counts["len"].to_numpy().astype(np.int64, copy=False)
+    offsets = np.empty(len(counts) + 1, dtype=np.int64)
+    offsets[0], offsets[1:] = 0, np.cumsum(counts)
     return BacktestDataset(
         pool_frame=encoded,
-        dates=dates,
-        symbols=np.asarray(symbol_values, dtype=object),
-        day_offsets=day_offsets,
+        bars=bar_counts["datetime"].to_numpy(),
+        symbols=np.asarray(symbol_table["symbol"].to_list(), dtype=object),
+        bar_offsets=offsets,
         row_symbol_ids=encoded["symbol_id"].to_numpy().astype(np.int32, copy=False),
-        ret=encoded["ret"].to_numpy().astype(np.float64, copy=False),
+        ret=encoded["ret"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
         pred=encoded["pred"].fill_null(float("nan")).to_numpy().astype(np.float64, copy=False),
-        size_rank=encoded["size_rank"].to_numpy().astype(np.int32, copy=False),
-        tradable=encoded["tradable"].to_numpy().astype(np.bool_, copy=False),
-        can_open=encoded["can_open"].to_numpy().astype(np.bool_, copy=False),
-        can_trade_buy=encoded["can_trade_buy"].to_numpy().astype(np.bool_, copy=False),
-        can_trade_sell=encoded["can_trade_sell"].to_numpy().astype(np.bool_, copy=False),
-        can_open_base=encoded["can_open_base"].to_numpy().astype(np.bool_, copy=False),
-        close_ex=encoded["close_ex"].to_numpy().astype(np.float64, copy=False),
-        vwap30=encoded["vwap30"].to_numpy().astype(np.float64, copy=False),
-        vwap30ori=encoded["vwap30ori"].to_numpy().astype(np.float64, copy=False),
+        size_rank=encoded["size_rank"].fill_null(999999).to_numpy().astype(np.int32, copy=False),
+        tradable=encoded["tradable"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_open=encoded["can_open"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_open_base=encoded["can_open_base"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_trade_buy=encoded["can_trade_buy"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        can_trade_sell=encoded["can_trade_sell"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
     )
 
 
 def _encode_dataset(pool: pl.DataFrame) -> BacktestDataset:
-    symbol_values = pool["symbol"].unique().sort().to_list()
-    symbol_map = pl.DataFrame({"symbol": symbol_values}).with_row_index("symbol_id")
-    encoded = pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx")
-
-    return _dataset_from_encoded_frame(encoded)
+    symbols = pool["symbol"].unique().sort().to_list()
+    symbol_map = pl.DataFrame({"symbol": symbols}).with_row_index("symbol_id")
+    return _dataset_from_encoded_frame(pool.join(symbol_map, on="symbol", how="left").with_row_index("row_idx"))
 
 
 def _file_signature(path: Path) -> dict[str, int | str]:
     stat = path.stat()
-    return {
-        "path": path.resolve().as_posix(),
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-    }
+    return {"path": path.resolve().as_posix(), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
 
-def _pool_cache_path(
-    cache_dir: Path,
-    data_path: Path,
-    pred_files: list[Path],
-    start: str,
-    universe: list | None,
-    allow_st_open: bool,
-) -> Path:
+def _pool_cache_path(cache_dir: Path, freq_cfg: dict, daily_path: Path, pred_files: list[Path], start: str, end: str | None, universe: list[str] | None, allow_st_open: bool) -> Path:
     payload = {
-        "version": POOL_CACHE_VERSION,
-        "data": _file_signature(data_path),
-        "predictions": [_file_signature(path) for path in pred_files],
-        "start": start,
-        "universe": list(universe) if universe is not None else None,
-        "allow_st_open": allow_st_open,
+        "version": POOL_CACHE_VERSION, "frequency": _frequency_name(freq_cfg), "market": _file_signature(Path(freq_cfg["market_data"])),
+        "daily_flags": _file_signature(daily_path), "predictions": [_file_signature(path) for path in pred_files],
+        "start": start, "end": end, "universe": list(universe) if universe is not None else None, "allow_st_open": allow_st_open,
     }
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-    return cache_dir / f"pool_{digest}.parquet"
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+    return cache_dir / f"pool_{_frequency_name(freq_cfg)}_{digest}.parquet"
 
 
-def _read_cached_pool(cache_path: Path) -> BacktestDataset | None:
-    if not cache_path.exists():
+def _read_cached_pool(path: Path) -> BacktestDataset | None:
+    if not path.exists():
         return None
-
     try:
-        encoded = pl.read_parquet(cache_path)
-        return _dataset_from_encoded_frame(encoded)
-    except Exception:
+        return _dataset_from_encoded_frame(pl.read_parquet(path))
+    except Exception as exc:
+        logger.warning("Ignoring incompatible pool cache {}: {}", path.name, exc)
         return None
 
 
 def build_pool(
-    data_path: Path,
-    preds_dir: Path,
-    bm_path: Path,
-    horizons: list,
-    start: str,
-    end: str | None,
-    universe: list | None,
-    allow_st_open: bool,
-    use_cache: bool = True,
-    cache_dir: Path | None = None,
-    nosuspend_days: int = 10,
+    freq_cfg: dict, bm_path: Path, start: str, end: str | None, universe: list[str] | None, allow_st_open: bool,
+    use_cache: bool = True, cache_dir: Path | None = None, nosuspend_days: int = 10,
 ) -> tuple[BacktestDataset, pd.Series]:
-    """
-    Assemble the full pool and benchmark return series.
+    """Build a canonical pool for daily, 15-minute, or 5-minute backtests."""
+    import config as cfg
 
-    Returns
-    -------
-    pool   : BacktestDataset – market data joined with predictions and encoded for Numba
-    bm_ret : Series of daily benchmark returns
-    """
-    bm_ret = load_benchmark(bm_path)
-
-    pred_files = _prediction_files(preds_dir, horizons)
-    resolved_cache_dir = cache_dir if cache_dir is not None else data_path.parent / ".cache"
-    cache_path = _pool_cache_path(resolved_cache_dir, data_path, pred_files, start, universe, allow_st_open)
-
+    frequency = _frequency_name(freq_cfg)
+    daily_path = Path(cfg.FREQ_CONFIG["daily"]["market_data"])
+    pred_files = _prediction_files(Path(freq_cfg["preds_dir"]), list(freq_cfg["horizons"]))
+    resolved_cache_dir = cache_dir or Path(freq_cfg["market_data"]).parent / ".cache"
+    cache_path = _pool_cache_path(resolved_cache_dir, freq_cfg, daily_path, pred_files, start, end, universe, allow_st_open)
+    bm_ret = load_external_benchmark(cfg.EXTERNAL_NAV_PATH) if cfg.USE_EXTERNAL_BENCHMARK else load_benchmark(bm_path)
     if use_cache:
-        cached_dataset = _read_cached_pool(cache_path)
-        if cached_dataset is not None:
-            logger.debug("Pool cache: hit – {}", cache_path.name)
-            return cached_dataset, bm_ret
-        logger.debug("Pool cache: miss – {}", cache_path.name)
+        cached = _read_cached_pool(cache_path)
+        if cached is not None:
+            logger.info("Pool cache: hit – {}", cache_path.name)
+            return cached, bm_ret
+        logger.info("Pool cache: miss – {}", cache_path.name)
 
-    logger.info("Predictions: {} file(s) loaded – {}", len(pred_files), [f.name for f in pred_files])
-    try:
-        preds = _load_predictions_wide_mean(pred_files, start, end=end)
-    except PredictionAlignmentError:
-        preds = _load_predictions_long_form(pred_files, start, end=end)
-
-    market = load_market_data(data_path, start, end, universe, allow_st_open, nosuspend_days)
-    pool = market.join(preds, on=["date", "symbol"], how="left")
-    dataset = _encode_dataset(pool)
-
+    predictions = load_predictions(freq_cfg, start, end)
+    if frequency == "daily":
+        market = load_market_data_daily(freq_cfg, start, end, universe, allow_st_open, nosuspend_days)
+    else:
+        market = load_market_data_intraday(freq_cfg, start, end)
+        flags = load_daily_flags(daily_path, start, end, universe, allow_st_open, nosuspend_days)
+        _validate_columns(flags, {"limit_up_price", "limit_down_price"}, "Daily constraints parquet for intraday limit checks")
+        market = (
+            market.join(flags, on=["date", "symbol"], how="left")
+            .with_columns(
+                ((pl.col("execution_price") - pl.col("limit_up_price")).abs() <= 0.0005).fill_null(False).alias("is_limit_up"),
+                ((pl.col("execution_price") - pl.col("limit_down_price")).abs() <= 0.0005).fill_null(False).alias("is_limit_down"),
+            )
+            .with_columns(
+                ((pl.col("turnover") > 0) & ~pl.col("is_limit_up")).fill_null(False).alias("can_trade_buy"),
+                ((pl.col("turnover") > 0) & ~pl.col("is_limit_down")).fill_null(False).alias("can_trade_sell"),
+            )
+            .with_columns(
+                (pl.col("can_trade_buy") & pl.col("can_trade_sell")).alias("tradable"),
+                (pl.col("can_trade_buy") & pl.col("can_trade_sell") & pl.col("can_open_base").fill_null(False)).alias("can_open"),
+            )
+        )
+    dataset = _encode_dataset(market.join(predictions, on=["datetime", "symbol"], how="left").sort(["datetime", "symbol"]))
     if use_cache:
         resolved_cache_dir.mkdir(parents=True, exist_ok=True)
         dataset.pool_frame.write_parquet(cache_path)
-        logger.debug("Pool cache: wrote – {}", cache_path.name)
-
+        logger.info("Pool cache: wrote – {}", cache_path.name)
     return dataset, bm_ret
-
-
-if __name__ == "__main__":
-    import config as cfg
-
-    dataset, bm_ret = build_pool(
-        data_path=cfg.DATA_PATH,
-        preds_dir=cfg.PREDS_DIR,
-        bm_path=cfg.BM_PATH,
-        horizons=cfg.HORIZONS,
-        start=cfg.START,
-        end=cfg.END,
-        universe=cfg.UNIVERSE,
-        allow_st_open=cfg.ALLOW_ST_OPEN,
-        use_cache=cfg.USE_POOL_CACHE,
-        cache_dir=cfg.POOL_CACHE_DIR,
-    )
-    logger.debug("bm_ret head:\n{}", bm_ret.head())
-    logger.debug("pool_frame head:\n{}", dataset.pool_frame.head())
