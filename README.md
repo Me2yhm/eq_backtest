@@ -1,6 +1,6 @@
 # eq-backtest
 
-基于因子预测的 A 股日频回测框架，支持多组合规模并行回测、缓存加速与性能指标可视化。
+基于因子预测的 A 股回测框架，支持日频、15 分钟与 5 分钟频率，以及多组合规模并行回测、缓存加速与性能指标可视化。
 
 ---
 
@@ -20,7 +20,7 @@ uv sync                 # 根据 pyproject.toml 安装依赖
 .venv/bin/python run.py # Linux
 ```
 
-回测结果（指标 CSV、收益率 CSV、持仓 CSV、图表）会写入 `config.py` 中 `OUTPUT_DIR` 指定的目录，默认为 `output_long_4400/`。
+回测结果（指标 CSV、收益率 CSV、持仓 CSV、图表）会写入 `config.py` 中 `OUTPUT_DIR` 指定的目录，目录名包含频率，例如 `output_long_4400_15min/`。
 
 ---
 
@@ -78,8 +78,9 @@ eq-backtest/
 | `POOL_SIZE` | `4400` | 候选池大小（按预测排名取前 N） |
 | `PORT_SIZES` | `[900]` | 实际持仓数量列表，支持多组并行回测 |
 | `THRESH_OUT_BUFFER` | `500` | 退出缓冲（持仓滑出排名 `port_size + buffer` 才平仓） |
-| `TRADE_ON_NEXT_DAY` | `True` | `True`：T 日信号在 T+1 日执行，首日只生成信号不建仓；`False`：同日信号、同日持仓 |
-| `STRICT_FIRST_DAY_TOP_N` | `False` | `True`：首日只允许从严格 top N 信号窗口开仓；`False`：首日继续向后扫描直到尽量补满持仓 |
+| `FREQUENCY` | `"15min"` | 可选 `"daily"`、`"15min"` 或 `"5min"`；对应路径、预测目录和 horizon 由 `FREQ_CONFIG` 提供 |
+| `TRADE_ON_NEXT_BAR` | `True` | `True`：信号在下一 bar 执行；日频时一 bar 即一天 |
+| `STRICT_FIRST_BAR_TOP_N` | `False` | `True`：首个执行 bar 只允许严格 top-N 信号开仓 |
 | `COST_PER_TURNOVER` | `0.00045` | 单边交易成本（每换手单位扣减） |
 | `EXCLUDE_PERIOD` | `("2024-01-01","2024-03-31")` | 超额收益归零的异常区间，设为 `None` 关闭 |
 
