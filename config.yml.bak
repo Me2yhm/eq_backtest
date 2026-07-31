@@ -1,0 +1,61 @@
+# Backtest configuration overrides.
+# All keys are optional — missing keys fall back to defaults defined in config.py.
+# DO NOT commit this file to git. It is in .gitignore.
+
+# ── Time range ────────────────────────────────────────────────────────────────
+start: "2019-01-02"
+end: "2026-01-01"
+
+# ── Frequency ─────────────────────────────────────────────────────────────────
+frequency: "5min"
+freq_config:
+  daily:
+    market_data: "/ext/eq_data/daily_with_limit_prevcap.pqt"
+    preds_dir: "data/preds_size"
+    horizons: ["3d", "5d", "10d"]
+    market_columns: {execution_vwap: null, bar_close: null}
+  "15min":
+    market_data: "/ext/eq_data/15min_bar_full_left_close.parquet"
+    preds_dir: "/ext/trq"
+    horizons: ["predictions"]
+    market_columns: {execution_vwap: "vwap15", bar_close: "close"}
+  "5min":
+    market_data: "/ext/eq_data/5min_bar_full_left_close.parquet"
+    preds_dir: "/tmp/eq_preds/output_mse/output_bs16/predictions"
+    horizons: [""]
+    market_columns: {execution_vwap: "vwap5", bar_close: "close"}
+
+bm_path: "/ext/eq_data/ret_csi_1000.csv"
+bm_name: "csi_1000"
+pool_cache_dir: "data/.cache"
+use_pool_cache: true
+
+# ── Benchmark ─────────────────────────────────────────────────────────────────
+use_external_benchmark: true
+external_nav_path: "/ext/trq/nav.parquet"
+
+# ── Universe and strategy ─────────────────────────────────────────────────────
+universe: null
+is_short: false
+allow_st_open: false
+pool_size: 4400
+port_sizes: [800]
+thresh_out_buffer: 600
+trade_on_next_bar: false
+strict_first_bar_top_n: false
+close_on_size_drop: false
+
+# ── Aggregation and costs ─────────────────────────────────────────────────────
+agg_mode: "simple"
+compounding: false
+cost_per_turnover: 0.00045
+portfolio_initial_value: 1.0e+08
+exclude_period: ["2024-01-01", "2024-03-31"]
+
+# ── Debug ─────────────────────────────────────────────────────────────────────
+debug: false
+debug_symbol: "300169.XSHE"
+debug_datetime: "2019-01-03 09:46:00"
+
+# ── Eligibility and output ────────────────────────────────────────────────────
+nosuspend_days: 10
