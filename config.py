@@ -50,6 +50,7 @@ _DEFAULTS: dict = {
     "bm_name": "csi_1000",
     "pool_cache_dir": "data/.cache",
     "use_pool_cache": True,
+    "prediction_merge_mode": "concat_disjoint",
     # ── Benchmark ─────────────────────────────────────────────────────────────
     "use_external_benchmark": True,
     "external_nav_path": "/ext/trq/nav.parquet",
@@ -63,6 +64,8 @@ _DEFAULTS: dict = {
     "trade_on_next_bar": False,
     "strict_first_bar_top_n": False,
     "close_on_size_drop": False,
+    "weight_mode": "equal",
+    "max_weight_multiple": 2.0,
     # ── Aggregation and costs ─────────────────────────────────────────────────
     "agg_mode": "simple",
     "compounding": False,
@@ -150,6 +153,7 @@ BM_PATH: Path = _cfg["bm_path"]
 BM_NAME: str = _cfg["bm_name"]
 POOL_CACHE_DIR: Path = _cfg["pool_cache_dir"]
 USE_POOL_CACHE: bool = _cfg["use_pool_cache"]
+PREDICTION_MERGE_MODE: str = _cfg["prediction_merge_mode"]
 
 # ── Benchmark ─────────────────────────────────────────────────────────────────
 USE_EXTERNAL_BENCHMARK: bool = _cfg["use_external_benchmark"]
@@ -165,6 +169,8 @@ THRESH_OUT_BUFFER: int = _cfg["thresh_out_buffer"]
 TRADE_ON_NEXT_BAR: bool = _cfg["trade_on_next_bar"]
 STRICT_FIRST_BAR_TOP_N: bool = _cfg["strict_first_bar_top_n"]
 CLOSE_ON_SIZE_DROP: bool = _cfg["close_on_size_drop"]
+WEIGHT_MODE: str = _cfg["weight_mode"]
+MAX_WEIGHT_MULTIPLE: float = _cfg["max_weight_multiple"]
 
 # ── Aggregation and costs ─────────────────────────────────────────────────────
 AGG_MODE: str = _cfg["agg_mode"]

@@ -30,6 +30,14 @@ class PortfolioResult:
     target_weights: pd.DataFrame | None = None
 
 
+def _weight_mode_code(weight_mode: str) -> int:
+    modes = {"equal": 0, "rank_linear": 1, "rank_square": 2}
+    try:
+        return modes[weight_mode]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported weight_mode={weight_mode!r}; expected one of {tuple(modes)}") from exc
+
+
 def _build_bar_orders(pool: BacktestDataset, ascending: bool) -> tuple[np.ndarray, np.ndarray]:
     cached = pool.sort_cache.get(ascending)
     if cached is not None:
@@ -136,6 +144,8 @@ def _simulate_portfolio_core(
     cost_per_turnover: float,
     portfolio_initial_value: float,
     record_target: bool,
+    weight_mode_code: int,
+    max_weight_multiple: float,
     debug_target_symbol_id: int,
     debug_target_bar_idx: int,
 ) -> tuple:
@@ -146,6 +156,7 @@ def _simulate_portfolio_core(
     target = np.zeros(n_symbols, dtype=np.bool_)
     held = np.zeros(n_symbols, dtype=np.bool_)
     current_weights = np.zeros(n_symbols, dtype=np.float64)
+    target_weight_by_symbol = np.zeros(n_symbols, dtype=np.float64)
     frozen_weights = np.zeros(n_symbols, dtype=np.float64)
     cash_weight = 1.0
 
@@ -377,9 +388,33 @@ def _simulate_portfolio_core(
                     target_symbols[target_count] = symbol_id
                     target_count += 1
 
-            target_weight = 0.0
+            target_weight_by_symbol[:] = 0.0
             if target_count > 0:
-                target_weight = nominal_weight
+                if weight_mode_code == 0:
+                    for i in range(target_count):
+                        target_weight_by_symbol[target_symbols[i]] = nominal_weight
+                else:
+                    raw_sum = 0.0
+                    for i in range(target_count):
+                        symbol_id = target_symbols[i]
+                        rank_value = rank_by_symbol[symbol_id]
+                        score = (thresh_out - rank_value + 1.0) / thresh_out
+                        if score < 0.0:
+                            score = 0.0
+                        if weight_mode_code == 2:
+                            score = score * score
+                        target_weight_by_symbol[symbol_id] = score
+                        raw_sum += score
+                    target_capital = target_count * nominal_weight
+                    max_weight = max_weight_multiple * nominal_weight
+                    if raw_sum > eps:
+                        for i in range(target_count):
+                            symbol_id = target_symbols[i]
+                            target_weight_by_symbol[symbol_id] = (
+                                target_weight_by_symbol[symbol_id] / raw_sum * target_capital
+                            )
+                            if target_weight_by_symbol[symbol_id] > max_weight:
+                                target_weight_by_symbol[symbol_id] = max_weight
 
             if debug_this_bar:
                 symbol_id = debug_target_symbol_id
@@ -402,7 +437,7 @@ def _simulate_portfolio_core(
                 cur_w = current_weights[symbol_id]
                 if cur_w <= eps:
                     continue
-                tgt_w = target_weight if target[symbol_id] else 0.0
+                tgt_w = target_weight_by_symbol[symbol_id] if target[symbol_id] else 0.0
                 reduction = cur_w - tgt_w
                 if reduction > eps:
                     target_group = 1.0 if target[symbol_id] else 0.0
@@ -418,7 +453,7 @@ def _simulate_portfolio_core(
                         break
                     symbol_id = sell_candidates[sell_order[oi]]
                     cur_w = current_weights[symbol_id]
-                    tgt_w = target_weight if target[symbol_id] else 0.0
+                    tgt_w = target_weight_by_symbol[symbol_id] if target[symbol_id] else 0.0
                     reduction = cur_w - tgt_w
                     if reduction <= eps:
                         continue
@@ -474,7 +509,7 @@ def _simulate_portfolio_core(
                 row_idx = current_row[symbol_id]
                 if row_idx == -1 or not can_open[row_idx]:
                     continue
-                deficit = target_weight - current_weights[symbol_id]
+                deficit = target_weight_by_symbol[symbol_id] - current_weights[symbol_id]
                 if deficit > eps:
                     buy_candidates[buy_count] = symbol_id
                     buy_keys[buy_count] = -pred[row_idx] + symbol_id * 1e-12
@@ -487,7 +522,7 @@ def _simulate_portfolio_core(
                 buy_order = np.argsort(buy_keys[:buy_count])
                 for oi in range(buy_count):
                     symbol_id = buy_candidates[buy_order[oi]]
-                    deficit = target_weight - current_weights[symbol_id]
+                    deficit = target_weight_by_symbol[symbol_id] - current_weights[symbol_id]
                     if debug_this_bar and symbol_id == debug_target_symbol_id:
                         debug_buy_order_rank = oi + 1
                         debug_buy_cash_before = cash_weight
@@ -678,10 +713,6 @@ def _simulate_portfolio_core(
 
         prev_count = next_prev_count
         held_counts[bar_idx] = held_count
-        current_target_weight = 0.0
-        if target_count > 0:
-            current_target_weight = nominal_weight
-
         for i in range(held_count):
             symbol_id = held_symbols[i]
             row_idx = current_row[symbol_id]
@@ -710,8 +741,11 @@ def _simulate_portfolio_core(
                 symbol_id = target_symbols[i]
                 target_rec_bar_idx[target_rec_count] = bar_idx
                 target_rec_symbol_id[target_rec_count] = symbol_id
-                target_rec_weight[target_rec_count] = current_target_weight
+                target_rec_weight[target_rec_count] = target_weight_by_symbol[symbol_id]
                 target_rec_count += 1
+
+        for i in range(target_count):
+            target_weight_by_symbol[target_symbols[i]] = 0.0
 
     return (
         rec_bar_idx[:rec_count],
@@ -906,6 +940,8 @@ def generate_portfolio(
     debug_datetime: str | None = None,
     cost_per_turnover: float = 0.00045,
     portfolio_initial_value: float = 1e8,
+    weight_mode: str = "equal",
+    max_weight_multiple: float = 2.0,
 ) -> PortfolioResult:
     """Simulate a frequency-independent equal-weight portfolio with daily constraints."""
     thresh_out = port_size + thresh_out_buffer
@@ -981,6 +1017,8 @@ def generate_portfolio(
         cost_per_turnover=cost_per_turnover,
         portfolio_initial_value=portfolio_initial_value,
         record_target=record_target_weights,
+        weight_mode_code=_weight_mode_code(weight_mode),
+        max_weight_multiple=max_weight_multiple,
         debug_target_symbol_id=debug_target_symbol_id,
         debug_target_bar_idx=debug_target_bar_idx,
     )
@@ -1066,6 +1104,8 @@ def generate_target_weights(
     is_short: bool = True,
     cost_per_turnover: float = 0.00045,
     portfolio_initial_value: float = 1e8,
+    weight_mode: str = "equal",
+    max_weight_multiple: float = 2.0,
 ) -> pd.DataFrame:
     """Simulate only to export the ideal target-layer equal-weight snapshots."""
     thresh_out = port_size + thresh_out_buffer
@@ -1138,6 +1178,8 @@ def generate_target_weights(
         cost_per_turnover=cost_per_turnover,
         portfolio_initial_value=portfolio_initial_value,
         record_target=True,
+        weight_mode_code=_weight_mode_code(weight_mode),
+        max_weight_multiple=max_weight_multiple,
         debug_target_symbol_id=-1,
         debug_target_bar_idx=-1,
     )

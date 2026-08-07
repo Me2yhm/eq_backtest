@@ -151,3 +151,5 @@ output_*
 *.rar
 tmp/
 ext_scripts/
+
+*_output

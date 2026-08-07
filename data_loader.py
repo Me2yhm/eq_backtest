@@ -13,7 +13,7 @@ import pandas as pd
 import polars as pl
 from loguru import logger
 
-POOL_CACHE_VERSION = 6
+POOL_CACHE_VERSION = 7
 _BASE_COLUMNS = {
     "datetime",
     "date",
@@ -133,6 +133,70 @@ def _filter_dates(frame: pl.DataFrame, datetime_column: str, start: str, end: st
     return out.drop("__date")
 
 
+def _filter_exclude_period(
+    frame: pl.DataFrame,
+    datetime_column: str,
+    exclude_period: tuple[str, str] | None,
+) -> pl.DataFrame:
+    """Remove an inclusive calendar-date interval from a frame."""
+    if not exclude_period or frame.is_empty():
+        return frame
+    lo = date.fromisoformat(str(exclude_period[0])[:10])
+    hi = date.fromisoformat(str(exclude_period[1])[:10])
+    if lo > hi:
+        raise ValueError(f"exclude_period start {lo} is after end {hi}")
+    frame_date = pl.col(datetime_column).dt.date()
+    return frame.filter(~frame_date.is_between(pl.lit(lo), pl.lit(hi), closed="both"))
+
+
+def _filter_benchmark_period(
+    series: pd.Series,
+    exclude_period: tuple[str, str] | None,
+) -> pd.Series:
+    if not exclude_period or series.empty:
+        return series
+    lo = pd.Timestamp(str(exclude_period[0])[:10]).date()
+    hi = pd.Timestamp(str(exclude_period[1])[:10]).date()
+    dates = pd.to_datetime(series.index).date
+    return series.loc[(dates < lo) | (dates > hi)]
+
+
+def _recompute_intraday_vwap_ret(frame: pl.DataFrame) -> pl.DataFrame:
+    """Compute next retained-bar VWAP return after any date filtering.
+
+    A symbol is only bridged when its next retained row is also the next
+    retained global bar.  Filtering an exclusion interval therefore creates
+    the intended direct pre-gap/post-gap transition, while ordinary missing
+    rows (for example a suspension) do not create a synthetic return.
+    """
+    if frame.is_empty():
+        return frame
+    bars = frame.select("datetime").unique().sort("datetime").with_columns(
+        pl.col("datetime").shift(-1).alias("__expected_next_datetime")
+    )
+    out = (
+        frame.sort(["datetime", "symbol"])
+        .with_columns([
+            pl.col("execution_vwap").shift(-1).over("symbol").alias("__next_vwap"),
+            pl.col("datetime").shift(-1).over("symbol").alias("__next_symbol_datetime"),
+        ])
+        .join(bars, on="datetime", how="left")
+        .with_columns(
+            pl.when(
+                (pl.col("__next_symbol_datetime") == pl.col("__expected_next_datetime"))
+                & (pl.col("execution_vwap") > 0)
+                & pl.col("__next_vwap").is_not_null()
+                & (pl.col("__next_vwap") > 0)
+            )
+            .then(pl.col("__next_vwap") / pl.col("execution_vwap") - 1.0)
+            .otherwise(None)
+            .alias("vwap_ret")
+        )
+        .drop(["__next_vwap", "__next_symbol_datetime", "__expected_next_datetime"])
+    )
+    return out
+
+
 def _normalize_prediction_frame(frame: pl.DataFrame, frequency: str) -> pl.DataFrame:
     columns = set(frame.columns)
     if {"trade_date", "stock_code", "prediction"}.issubset(columns):
@@ -163,19 +227,60 @@ def _normalize_prediction_frame(frame: pl.DataFrame, frequency: str) -> pl.DataF
     return wide.unpivot(index=index_name, variable_name="symbol", value_name="pred").rename({index_name: "datetime"})
 
 
-def load_predictions(freq_cfg: dict, start: str, end: str | None = None) -> pl.DataFrame:
+def _validate_prediction_frames(frames: list[pl.DataFrame], files: list[Path], merge_mode: str) -> None:
+    if merge_mode not in {"concat_disjoint", "mean"}:
+        raise ValueError("prediction_merge_mode must be 'concat_disjoint' or 'mean'")
+    ranges: list[tuple[date, date, str]] = []
+    for frame, path in zip(frames, files, strict=True):
+        if frame.is_empty():
+            continue
+        duplicate = (
+            frame.group_by(["datetime", "symbol"])
+            .len()
+            .filter(pl.col("len") > 1)
+            .head(1)
+        )
+        if not duplicate.is_empty():
+            raise ValueError(f"Prediction file contains duplicate (datetime, symbol) keys: {path}")
+        min_date, max_date = frame.select([
+            pl.col("datetime").dt.date().min().alias("min_date"),
+            pl.col("datetime").dt.date().max().alias("max_date"),
+        ]).row(0)
+        ranges.append((min_date, max_date, path.name))
+    if merge_mode == "concat_disjoint":
+        for index, (lo_a, hi_a, name_a) in enumerate(ranges):
+            for lo_b, hi_b, name_b in ranges[index + 1 :]:
+                if lo_a <= hi_b and lo_b <= hi_a:
+                    raise ValueError(
+                        "Prediction date ranges overlap; use prediction_merge_mode='mean' explicitly: "
+                        f"{name_a} [{lo_a}, {hi_a}] vs {name_b} [{lo_b}, {hi_b}]"
+                    )
+        logger.info("Prediction ranges: {}", ranges)
+
+
+def load_predictions(
+    freq_cfg: dict,
+    start: str,
+    end: str | None = None,
+    exclude_period: tuple[str, str] | None = None,
+    merge_mode: str = "concat_disjoint",
+) -> pl.DataFrame:
     """Load every frequency into the canonical ``[datetime, symbol, pred]`` form."""
     frequency = _frequency_name(freq_cfg)
     files = _prediction_files(Path(freq_cfg["preds_dir"]), list(freq_cfg["horizons"]))
-    frames = [_load_prediction_file(path, frequency, start, end) for path in files]
+    frames = [
+        _filter_exclude_period(_load_prediction_file(path, frequency, start, end), "datetime", exclude_period)
+        for path in files
+    ]
+    _validate_prediction_frames(frames, files, merge_mode)
     logger.info("{} predictions: {} file(s) loaded – {}", frequency, len(files), [path.name for path in files])
-    return (
-        pl
-        .concat(frames, how="vertical_relaxed")
-        .group_by(["datetime", "symbol"], maintain_order=True)
-        .agg(pl.col("pred").mean().alias("pred"))
-        .sort(["datetime", "symbol"])
-    )
+    combined = pl.concat(frames, how="vertical_relaxed")
+    if merge_mode == "mean":
+        combined = (
+            combined.group_by(["datetime", "symbol"], maintain_order=True)
+            .agg(pl.col("pred").mean().alias("pred"))
+        )
+    return combined.sort(["datetime", "symbol"])
 
 
 def _load_prediction_file(path: Path, frequency: str, start: str, end: str | None) -> pl.DataFrame:
@@ -233,6 +338,7 @@ def load_market_data_daily(
     universe: list[str] | None,
     allow_st_open: bool,
     nosuspend_days: int = 10,
+    exclude_period: tuple[str, str] | None = None,
 ) -> pl.DataFrame:
     """Read daily bars and normalize them to the common market schema."""
     frame = _normalize_symbol_column(pl.read_parquet(Path(freq_cfg["market_data"])))
@@ -263,6 +369,7 @@ def load_market_data_daily(
     frame = frame.filter(pl.col("date") >= pl.lit(start_date))
     if end:
         frame = frame.filter(pl.col("date") <= pl.lit(date.fromisoformat(end)))
+    frame = _filter_exclude_period(frame, "date", exclude_period)
     can_buy = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").fill_null(False).cast(pl.Boolean)
     can_sell = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").fill_null(False).cast(pl.Boolean)
     can_open_base = _can_open_base_expr(universe, allow_st_open, nosuspend_days)
@@ -344,7 +451,12 @@ def load_daily_flags(
     return ranked.select(keep).sort(["date", "symbol"])
 
 
-def load_market_data_intraday(freq_cfg: dict, start: str, end: str | None) -> pl.DataFrame:
+def load_market_data_intraday(
+    freq_cfg: dict,
+    start: str,
+    end: str | None,
+    exclude_period: tuple[str, str] | None = None,
+) -> pl.DataFrame:
     """Read any intraday parquet into the common, flag-free schema."""
     path = Path(freq_cfg["market_data"])
     schema = pl.read_parquet_schema(path)
@@ -378,7 +490,7 @@ def load_market_data_intraday(freq_cfg: dict, start: str, end: str | None) -> pl
     frame = frame.filter(pl.col("datetime") >= pl.lit(datetime.fromisoformat(start)))
     if end:
         frame = frame.filter(pl.col("datetime") < pl.lit(datetime.fromisoformat(end) + timedelta(days=1)))
-    return (
+    frame = (
         frame
         .with_columns(
             pl.col("datetime").dt.date().alias("date"),
@@ -389,6 +501,8 @@ def load_market_data_intraday(freq_cfg: dict, start: str, end: str | None) -> pl
         .collect()
         .sort(["datetime", "symbol"])
     )
+    frame = _filter_exclude_period(frame, "datetime", exclude_period)
+    return _recompute_intraday_vwap_ret(frame)
 
 
 def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
@@ -471,6 +585,8 @@ def _pool_cache_path(
     end: str | None,
     universe: list[str] | None,
     allow_st_open: bool,
+    exclude_period: tuple[str, str] | None,
+    prediction_merge_mode: str,
 ) -> Path:
     payload = {
         "version": POOL_CACHE_VERSION,
@@ -482,6 +598,8 @@ def _pool_cache_path(
         "end": end,
         "universe": list(universe) if universe is not None else None,
         "allow_st_open": allow_st_open,
+        "exclude_period": list(exclude_period) if exclude_period else None,
+        "prediction_merge_mode": prediction_merge_mode,
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
     return cache_dir / f"pool_{_frequency_name(freq_cfg)}_{digest}.parquet"
@@ -507,6 +625,8 @@ def build_pool(
     use_cache: bool = True,
     cache_dir: Path | None = None,
     nosuspend_days: int = 10,
+    exclude_period: tuple[str, str] | None = None,
+    prediction_merge_mode: str = "concat_disjoint",
 ) -> tuple[BacktestDataset, pd.Series]:
     """Build a canonical pool for daily, intraday, or 5-minute backtests."""
     import config as cfg
@@ -516,9 +636,19 @@ def build_pool(
     pred_files = _prediction_files(Path(freq_cfg["preds_dir"]), list(freq_cfg["horizons"]))
     resolved_cache_dir = cache_dir or Path(freq_cfg["market_data"]).parent / ".cache"
     cache_path = _pool_cache_path(
-        resolved_cache_dir, freq_cfg, daily_path, pred_files, start, end, universe, allow_st_open
+        resolved_cache_dir,
+        freq_cfg,
+        daily_path,
+        pred_files,
+        start,
+        end,
+        universe,
+        allow_st_open,
+        exclude_period,
+        prediction_merge_mode,
     )
     bm_ret = load_external_benchmark(cfg.EXTERNAL_NAV_PATH) if cfg.USE_EXTERNAL_BENCHMARK else load_benchmark(bm_path)
+    bm_ret = _filter_benchmark_period(bm_ret, exclude_period)
     if use_cache:
         cached = _read_cached_pool(cache_path)
         if cached is not None:
@@ -526,11 +656,19 @@ def build_pool(
             return cached, bm_ret
         logger.info("Pool cache: miss – {}", cache_path.name)
 
-    predictions = load_predictions(freq_cfg, start, end)
+    predictions = load_predictions(
+        freq_cfg,
+        start,
+        end,
+        exclude_period=exclude_period,
+        merge_mode=prediction_merge_mode,
+    )
     if frequency == "daily":
-        market = load_market_data_daily(freq_cfg, start, end, universe, allow_st_open, nosuspend_days)
+        market = load_market_data_daily(
+            freq_cfg, start, end, universe, allow_st_open, nosuspend_days, exclude_period
+        )
     else:
-        market = load_market_data_intraday(freq_cfg, start, end)
+        market = load_market_data_intraday(freq_cfg, start, end, exclude_period)
         flags = load_daily_flags(daily_path, start, end, universe, allow_st_open, nosuspend_days)
         _validate_columns(
             flags, {"limit_up_price", "limit_down_price"}, "Daily constraints parquet for intraday limit checks"

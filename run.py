@@ -9,6 +9,7 @@ Usage
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 import pandas as pd
 import polars as pl
@@ -22,7 +23,18 @@ from plotting import (
     plot_metrics_table,
     plot_portfolio_results,
 )
-from portfolio import generate_portfolio
+from portfolio import PortfolioResult, generate_portfolio
+
+
+@dataclass(slots=True)
+class PortfolioEvaluation:
+    result: PortfolioResult
+    portfolio_returns: pd.Series
+    turnover: pd.Series
+    close_counts: pd.DataFrame
+    excess: pd.Series
+    metrics: dict
+    portfolio_pnl: pd.DataFrame
 
 # ── Return computation ─────────────────────────────────────────────────────────
 
@@ -48,13 +60,6 @@ def compute_returns(
     """
     bm_aligned = bm_ret.reindex(portfolio_returns.index)
     excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
-
-    # exclude_period: 删除行 (对齐 evaluation/metrics.py L252-259 _apply_metric_filters)
-    # 旧口径: 置零 (excess.loc[...] = 0.0)
-    if exclude_period:
-        lo = pd.to_datetime(exclude_period[0])
-        hi = pd.to_datetime(exclude_period[1])
-        excess = excess[(excess.index < lo) | (excess.index >= hi)]
 
     return excess, turnover
 
@@ -82,13 +87,16 @@ def daily_sum_from_intraday(series_intraday: pd.Series, name: str) -> pd.Series:
 
 def _align_benchmark_to_index(bm_ret: pd.Series, index: pd.Index) -> pd.Series:
     """Align daily benchmark returns to target index (daily or intraday datetime index)."""
+    bm_daily = bm_ret.copy()
+    bm_daily.index = pd.to_datetime(bm_daily.index).normalize()
+    if bm_daily.index.has_duplicates:
+        bm_daily = bm_daily.groupby(level=0).sum()
     if isinstance(index, pd.DatetimeIndex):
-        bm_daily = bm_ret.copy()
-        bm_daily.index = pd.to_datetime(bm_daily.index).normalize()
-        if (index != index.normalize()).any():
-            aligned_values = bm_daily.reindex(index.normalize()).to_numpy()
-            return pd.Series(aligned_values, index=index, name=bm_ret.name)
-    return bm_ret.reindex(index)
+        aligned_values = bm_daily.reindex(index.normalize()).to_numpy()
+        return pd.Series(aligned_values, index=index, name=bm_ret.name)
+    target_index = pd.to_datetime(index)
+    aligned_values = bm_daily.reindex(target_index.normalize()).to_numpy()
+    return pd.Series(aligned_values, index=index, name=bm_ret.name)
 
 
 def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
@@ -126,21 +134,6 @@ def _build_portfolio_pnl_frame(
     benchmark = daily_benchmark.cumsum().rename("benchmark")
     close_count = close_counts["n_closed"].reindex(portfolio_returns.index).fillna(0).astype(int).rename("close_count")
 
-    # exclude_period: 删除行 (对齐 evaluation/metrics.py L252-259)
-    # 旧口径: 置零 daily_strategy/daily_alpha/daily_tto
-    if exclude_period:
-        lo = pd.to_datetime(exclude_period[0])
-        hi = pd.to_datetime(exclude_period[1])
-        keep = (daily_strategy.index < lo) | (daily_strategy.index >= hi)
-        all_pl = all_pl[keep]
-        alpha_pl = alpha_pl[keep]
-        benchmark = benchmark[keep]
-        daily_strategy = daily_strategy[keep]
-        daily_benchmark = daily_benchmark[keep]
-        daily_alpha = daily_alpha[keep]
-        daily_tto = daily_tto[keep]
-        close_count = close_count[keep]
-
     frame = pd.concat(
         [
             all_pl,
@@ -156,6 +149,96 @@ def _build_portfolio_pnl_frame(
     )
     frame.index.name = "date"
     return frame
+
+
+def evaluate_portfolio_result(
+    result: PortfolioResult,
+    bm_ret: pd.Series,
+    frequency: str,
+    agg_mode: str,
+    is_short: bool,
+    compounding: bool,
+) -> PortfolioEvaluation:
+    """Evaluate one simulator result using the project's excess-return metric."""
+    is_intraday = frequency != "daily"
+    if is_intraday:
+        portfolio_returns = daily_returns_from_intraday(result.portfolio_returns, agg_mode=agg_mode)
+        turnover = daily_sum_from_intraday(result.turnover, "turnover")
+        close_counts = pd.DataFrame({
+            "n_closed": daily_sum_from_intraday(result.close_counts["n_closed"], "n_closed").astype(int)
+        })
+    else:
+        portfolio_returns = result.portfolio_returns
+        turnover = result.turnover
+        close_counts = result.close_counts
+
+    excess, _ = compute_returns(
+        portfolio_returns,
+        result.cost_turnover,
+        turnover,
+        bm_ret,
+        is_short=is_short,
+        exclude_period=None,
+    )
+    portfolio_pnl = _build_portfolio_pnl_frame(
+        portfolio_returns=portfolio_returns,
+        cost_turnover=result.cost_turnover,
+        turnover=turnover,
+        bm_ret=bm_ret,
+        close_counts=close_counts,
+        is_short=is_short,
+        exclude_period=None,
+    )
+    metrics = portfolio_metrics(excess, compounding=compounding)
+    metrics["Ann. Turnover"] = float(turnover.mean() * 242) if not turnover.empty else 0.0
+    return PortfolioEvaluation(
+        result=result,
+        portfolio_returns=portfolio_returns,
+        turnover=turnover,
+        close_counts=close_counts,
+        excess=excess,
+        metrics=metrics,
+        portfolio_pnl=portfolio_pnl,
+    )
+
+
+def run_single_portfolio(
+    pool,
+    bm_ret: pd.Series,
+    *,
+    port_size: int,
+    pool_size: int,
+    thresh_out_buffer: int,
+    frequency: str,
+    agg_mode: str,
+    is_short: bool,
+    trade_on_next_bar: bool,
+    strict_first_bar_top_n: bool,
+    close_on_size_drop: bool,
+    cost_per_turnover: float,
+    compounding: bool,
+    weight_mode: str = "equal",
+    max_weight_multiple: float = 2.0,
+    output_dir: str = "",
+) -> PortfolioEvaluation:
+    result = generate_portfolio(
+        pool=pool,
+        port_size=port_size,
+        thresh_out_buffer=thresh_out_buffer,
+        size_cut=pool_size,
+        close_on_size_drop=close_on_size_drop,
+        trade_on_next_bar=trade_on_next_bar,
+        strict_first_bar_top_n=strict_first_bar_top_n,
+        is_short=is_short,
+        output_dir=output_dir,
+        plot_heatmap=False,
+        record_target_weights=False,
+        cost_per_turnover=cost_per_turnover,
+        portfolio_initial_value=cfg.PORTFOLIO_INITIAL_VALUE,
+        weight_mode=weight_mode,
+        max_weight_multiple=max_weight_multiple,
+    )
+    return evaluate_portfolio_result(result, bm_ret, frequency, agg_mode, is_short, compounding)
 
 
 # ── Logging helper ─────────────────────────────────────────────────────────────
@@ -187,6 +270,8 @@ def run() -> None:
         use_cache=cfg.USE_POOL_CACHE,
         cache_dir=cfg.POOL_CACHE_DIR,
         nosuspend_days=cfg.NOSUSPEND_DAYS,
+        exclude_period=cfg.EXCLUDE_PERIOD,
+        prediction_merge_mode=cfg.PREDICTION_MERGE_MODE,
     )
 
     # ── Run for each portfolio size ───────────────────────────────────────────
@@ -215,6 +300,8 @@ def run() -> None:
             debug_datetime=cfg.DEBUG_DATETIME,
             cost_per_turnover=cfg.COST_PER_TURNOVER,
             portfolio_initial_value=cfg.PORTFOLIO_INITIAL_VALUE,
+            weight_mode=cfg.WEIGHT_MODE,
+            max_weight_multiple=cfg.MAX_WEIGHT_MULTIPLE,
         )
 
         positions = result.positions
@@ -226,45 +313,25 @@ def run() -> None:
                 f"{output_dir}target_weights_{port_size}.csv",
                 f"{output_dir}target_weights_{port_size}.parquet",
             )
-        is_intraday = cfg.FREQUENCY != "daily"
-        if is_intraday:
-            portfolio_returns_eval = daily_returns_from_intraday(result.portfolio_returns, agg_mode=cfg.AGG_MODE)
-            cost_turnover_eval = daily_sum_from_intraday(result.cost_turnover, "cost_turnover")
-            turnover_eval = daily_sum_from_intraday(result.turnover, "turnover")
-            close_counts_eval = pd.DataFrame({
-                "n_closed": daily_sum_from_intraday(close_counts["n_closed"], "n_closed").astype(int)
-            })
-        else:
-            portfolio_returns_eval = result.portfolio_returns
-            cost_turnover_eval = result.cost_turnover
-            turnover_eval = result.turnover
-            close_counts_eval = close_counts
-
-        excess, turnover = compute_returns(
-            portfolio_returns_eval,
-            cost_turnover_eval,
-            turnover_eval,
-            bm_ret,
-            is_short=cfg.IS_SHORT,
-            exclude_period=cfg.EXCLUDE_PERIOD,
-        )
-        portfolio_pnl = _build_portfolio_pnl_frame(
-            portfolio_returns=portfolio_returns_eval,
-            cost_turnover=cost_turnover_eval,
-            turnover=turnover_eval,
+        evaluation = evaluate_portfolio_result(
+            result=result,
             bm_ret=bm_ret,
-            close_counts=close_counts_eval,
+            frequency=cfg.FREQUENCY,
+            agg_mode=cfg.AGG_MODE,
             is_short=cfg.IS_SHORT,
-            exclude_period=cfg.EXCLUDE_PERIOD,
+            compounding=cfg.COMPOUNDING,
         )
+        excess = evaluation.excess
+        turnover = evaluation.turnover
+        close_counts_eval = evaluation.close_counts
+        portfolio_pnl = evaluation.portfolio_pnl
         portfolio_pnl.to_csv(
             f"{output_dir}portfolio_pnl_{port_size}.csv",
             index_label="date",
             float_format="%.8f",
         )
 
-        m = portfolio_metrics(excess, compounding=cfg.COMPOUNDING)
-        m["Ann. Turnover"] = float(turnover.mean() * 242)
+        m = evaluation.metrics
         all_metrics[port_size] = m
         all_ret[port_size] = excess.rename(f"Port_{port_size}")
         all_cumrets[port_size] = excess.cumsum().rename(f"Port_{port_size}")
