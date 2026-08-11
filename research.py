@@ -88,56 +88,69 @@ def signal_validation(
             pl.col("__rank_signal").rank("average").over("datetime").alias("__pred_rank_avg"),
             pl.col("vwap_ret").rank("average").over("datetime").alias("__ret_rank_avg"),
         ])
-        bars = frame.group_by("datetime", maintain_order=True).agg([
-            pl.len().alias("n_obs"),
-            pl.corr("__rank_signal", "vwap_ret").alias("ic"),
-            pl.corr("__pred_rank_avg", "__ret_rank_avg").alias("rank_ic"),
-            pl.col("vwap_ret").filter(pl.col("layer_rank") <= top_n).mean().alias("top_mean_ret"),
-            pl.col("vwap_ret")
-            .filter(pl.col("layer_rank") > pl.col("layer_size") - bottom_n)
-            .mean()
-            .alias("bottom_mean_ret"),
-        ]).with_columns([
-            (pl.col("top_mean_ret") - pl.col("bottom_mean_ret")).alias("top_bottom_spread"),
-            pl.lit(layer).alias("layer"),
-        ]).with_columns([
-            pl.col("datetime").dt.year().alias("year"),
-            pl.col("datetime").dt.month().alias("month"),
-        ])
+        bars = (
+            frame
+            .group_by("datetime", maintain_order=True)
+            .agg([
+                pl.len().alias("n_obs"),
+                pl.corr("__rank_signal", "vwap_ret").alias("ic"),
+                pl.corr("__pred_rank_avg", "__ret_rank_avg").alias("rank_ic"),
+                pl.col("vwap_ret").filter(pl.col("layer_rank") <= top_n).mean().alias("top_mean_ret"),
+                pl
+                .col("vwap_ret")
+                .filter(pl.col("layer_rank") > pl.col("layer_size") - bottom_n)
+                .mean()
+                .alias("bottom_mean_ret"),
+            ])
+            .with_columns([
+                (pl.col("top_mean_ret") - pl.col("bottom_mean_ret")).alias("top_bottom_spread"),
+                pl.lit(layer).alias("layer"),
+            ])
+            .with_columns([
+                pl.col("datetime").dt.year().alias("year"),
+                pl.col("datetime").dt.month().alias("month"),
+            ])
+        )
         per_layer.append(bars)
 
     if not per_layer:
-        empty = pl.DataFrame(schema={
-            "datetime": pl.Datetime,
-            "layer": pl.String,
-            "n_obs": pl.Int64,
-            "ic": pl.Float64,
-            "rank_ic": pl.Float64,
-            "top_mean_ret": pl.Float64,
-            "bottom_mean_ret": pl.Float64,
-            "top_bottom_spread": pl.Float64,
-            "year": pl.Int32,
-            "month": pl.Int8,
-        })
+        empty = pl.DataFrame(
+            schema={
+                "datetime": pl.Datetime,
+                "layer": pl.String,
+                "n_obs": pl.Int64,
+                "ic": pl.Float64,
+                "rank_ic": pl.Float64,
+                "top_mean_ret": pl.Float64,
+                "bottom_mean_ret": pl.Float64,
+                "top_bottom_spread": pl.Float64,
+                "year": pl.Int32,
+                "month": pl.Int8,
+            }
+        )
         return empty, empty
 
     per_bar = pl.concat(per_layer, how="vertical_relaxed").sort(["layer", "datetime"])
-    summary = per_bar.group_by(["layer", "year", "month"], maintain_order=True).agg([
-        pl.len().alias("n_bars"),
-        pl.col("n_obs").mean().alias("avg_n_obs"),
-        pl.col("ic").mean().alias("mean_ic"),
-        pl.col("rank_ic").mean().alias("mean_rank_ic"),
-        pl.col("top_mean_ret").mean().alias("mean_top_ret"),
-        pl.col("bottom_mean_ret").mean().alias("mean_bottom_ret"),
-        pl.col("top_bottom_spread").mean().alias("mean_top_bottom_spread"),
-    ]).sort(["layer", "year", "month"])
+    summary = (
+        per_bar
+        .group_by(["layer", "year", "month"], maintain_order=True)
+        .agg([
+            pl.len().alias("n_bars"),
+            pl.col("n_obs").mean().alias("avg_n_obs"),
+            pl.col("ic").mean().alias("mean_ic"),
+            pl.col("rank_ic").mean().alias("mean_rank_ic"),
+            pl.col("top_mean_ret").mean().alias("mean_top_ret"),
+            pl.col("bottom_mean_ret").mean().alias("mean_bottom_ret"),
+            pl.col("top_bottom_spread").mean().alias("mean_top_bottom_spread"),
+        ])
+        .sort(["layer", "year", "month"])
+    )
     return per_bar, summary
 
 
 def _slice_dataset(pool: BacktestDataset, start: str, end: str) -> BacktestDataset:
     frame = pool.pool_frame.filter(
-        (pl.col("datetime") >= pl.lit(pd.Timestamp(start)))
-        & (pl.col("datetime") < pl.lit(pd.Timestamp(end)))
+        (pl.col("datetime") >= pl.lit(pd.Timestamp(start))) & (pl.col("datetime") < pl.lit(pd.Timestamp(end)))
     ).drop([column for column in ("row_idx", "symbol_id") if column in pool.pool_frame.columns])
     if frame.is_empty():
         return _encode_dataset(frame, derive_prev_close=True)
@@ -150,9 +163,9 @@ def parameter_sweep(
     *,
     splits: dict[str, tuple[str, str]],
     pool_sizes: tuple[int, ...] = (2200, 3300, 4400, 5500),
-    port_sizes: tuple[int, ...] = (400, 800, 1200),
-    buffers: tuple[int, ...] = (0, 100, 300, 600, 1000),
-    costs: tuple[float, ...] = (0.00045, 0.0008, 0.0012),
+    port_sizes: tuple[int, ...] = (200, 400, 800, 1200),
+    buffers: tuple[int, ...] = (0, 100, 300, 600, 1000, 1200, 1400),
+    costs: tuple[float, ...] = (0.00045,),
     weight_modes: tuple[str, ...] = ("equal",),
 ) -> pd.DataFrame:
     """Run the configured grid independently on each time split."""
