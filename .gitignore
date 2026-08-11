@@ -153,3 +153,4 @@ tmp/
 ext_scripts/
 
 *_output
+*_output_*

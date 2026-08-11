@@ -105,7 +105,7 @@ def _normalize_symbol_column(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def _prediction_files(preds_dir: Path, horizons: list[str]) -> list[Path]:
-    files = sorted(preds_dir.glob("*.parquet"))
+    files = sorted(preds_dir.rglob("*.parquet"))
     if not files:
         raise FileNotFoundError(f"No parquet prediction files found in '{preds_dir}'")
     selected = [path for path in files if any(horizon in path.stem for horizon in horizons)]
@@ -171,18 +171,24 @@ def _recompute_intraday_vwap_ret(frame: pl.DataFrame) -> pl.DataFrame:
     """
     if frame.is_empty():
         return frame
-    bars = frame.select("datetime").unique().sort("datetime").with_columns(
-        pl.col("datetime").shift(-1).alias("__expected_next_datetime")
+    bars = (
+        frame
+        .select("datetime")
+        .unique()
+        .sort("datetime")
+        .with_columns(pl.col("datetime").shift(-1).alias("__expected_next_datetime"))
     )
     out = (
-        frame.sort(["datetime", "symbol"])
+        frame
+        .sort(["datetime", "symbol"])
         .with_columns([
             pl.col("execution_vwap").shift(-1).over("symbol").alias("__next_vwap"),
             pl.col("datetime").shift(-1).over("symbol").alias("__next_symbol_datetime"),
         ])
         .join(bars, on="datetime", how="left")
         .with_columns(
-            pl.when(
+            pl
+            .when(
                 (pl.col("__next_symbol_datetime") == pl.col("__expected_next_datetime"))
                 & (pl.col("execution_vwap") > 0)
                 & pl.col("__next_vwap").is_not_null()
@@ -234,12 +240,7 @@ def _validate_prediction_frames(frames: list[pl.DataFrame], files: list[Path], m
     for frame, path in zip(frames, files, strict=True):
         if frame.is_empty():
             continue
-        duplicate = (
-            frame.group_by(["datetime", "symbol"])
-            .len()
-            .filter(pl.col("len") > 1)
-            .head(1)
-        )
+        duplicate = frame.group_by(["datetime", "symbol"]).len().filter(pl.col("len") > 1).head(1)
         if not duplicate.is_empty():
             raise ValueError(f"Prediction file contains duplicate (datetime, symbol) keys: {path}")
         min_date, max_date = frame.select([
@@ -276,9 +277,8 @@ def load_predictions(
     logger.info("{} predictions: {} file(s) loaded – {}", frequency, len(files), [path.name for path in files])
     combined = pl.concat(frames, how="vertical_relaxed")
     if merge_mode == "mean":
-        combined = (
-            combined.group_by(["datetime", "symbol"], maintain_order=True)
-            .agg(pl.col("pred").mean().alias("pred"))
+        combined = combined.group_by(["datetime", "symbol"], maintain_order=True).agg(
+            pl.col("pred").mean().alias("pred")
         )
     return combined.sort(["datetime", "symbol"])
 
@@ -420,13 +420,15 @@ def load_daily_flags(
     # Rank only the eligible universe.  Applying rank before masking ineligible
     # rows changes every remaining rank and breaks the reference portfolio.
     eligible_ranked = (
-        base_frame.filter(rank_scope)
+        base_frame
+        .filter(rank_scope)
         .select(["date", "symbol", "log_size"])
         .with_columns(pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank"))
         .select(["date", "symbol", "size_rank"])
     )
     ranked = (
-        base_frame.drop("size_rank")
+        base_frame
+        .drop("size_rank")
         .join(eligible_ranked, on=["date", "symbol"], how="left")
         .with_columns(pl.col("size_rank").fill_null(999999).cast(pl.Int32))
     )
@@ -523,7 +525,15 @@ def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
         bar_date_session = bar_datetimes.normalize().astype("int64") // 10**9 * 10 + bar_session_half
         bar_session_index = pd.factorize(bar_date_session)[0].astype(np.int32)
     snapshot_columns = [
-        "date", "symbol", "log_size", "size_rank", "industry", "index", "listed_Satisfied", "is_ST", "normal_days",
+        "date",
+        "symbol",
+        "log_size",
+        "size_rank",
+        "industry",
+        "index",
+        "listed_Satisfied",
+        "is_ST",
+        "normal_days",
     ]
     return BacktestDataset(
         pool_frame=encoded,
@@ -560,14 +570,18 @@ def _encode_dataset(pool: pl.DataFrame, derive_prev_close: bool = False) -> Back
         ])
         all_datetimes = encoded["datetime"].unique().sort()
         previous_datetime = {all_datetimes[index]: all_datetimes[index - 1] for index in range(1, len(all_datetimes))}
-        encoded = encoded.with_columns(
-            pl.col("datetime").replace_strict(previous_datetime, default=None).alias("expected_prev_dt")
-        ).with_columns(
-            pl.when(pl.col("expected_prev_dt").is_null() | (pl.col("prev_symbol_dt") != pl.col("expected_prev_dt")))
-            .then(0.0)
-            .otherwise(pl.col("prev_close_raw"))
-            .alias("prev_close")
-        ).sort(["datetime", "symbol"])
+        encoded = (
+            encoded
+            .with_columns(pl.col("datetime").replace_strict(previous_datetime, default=None).alias("expected_prev_dt"))
+            .with_columns(
+                pl
+                .when(pl.col("expected_prev_dt").is_null() | (pl.col("prev_symbol_dt") != pl.col("expected_prev_dt")))
+                .then(0.0)
+                .otherwise(pl.col("prev_close_raw"))
+                .alias("prev_close")
+            )
+            .sort(["datetime", "symbol"])
+        )
     return _dataset_from_encoded_frame(encoded)
 
 
@@ -664,9 +678,7 @@ def build_pool(
         merge_mode=prediction_merge_mode,
     )
     if frequency == "daily":
-        market = load_market_data_daily(
-            freq_cfg, start, end, universe, allow_st_open, nosuspend_days, exclude_period
-        )
+        market = load_market_data_daily(freq_cfg, start, end, universe, allow_st_open, nosuspend_days, exclude_period)
     else:
         market = load_market_data_intraday(freq_cfg, start, end, exclude_period)
         flags = load_daily_flags(daily_path, start, end, universe, allow_st_open, nosuspend_days)
