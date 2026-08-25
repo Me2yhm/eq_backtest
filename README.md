@@ -82,7 +82,7 @@ eq-backtest/
 | `TRADE_ON_NEXT_BAR` | `True` | `True`：信号在下一 bar 执行；日频时一 bar 即一天 |
 | `STRICT_FIRST_BAR_TOP_N` | `False` | `True`：首个执行 bar 只允许严格 top-N 信号开仓 |
 | `COST_PER_TURNOVER` | `0.00045` | 单边交易成本（每换手单位扣减） |
-| `EXCLUDE_PERIOD` | `("2024-01-01","2024-03-31")` | 从行情、预测和 benchmark 中删除的包含起止日期区间，设为 `None` 关闭 |
+| `EXCLUDE_PERIOD` | `("2024-01-01","2024-03-31")` | 仅从最终评价指标序列中剔除 `[start, end)` 区间；行情、预测、持仓和调仓时间轴保持完整，设为 `None` 关闭 |
 | `PREDICTION_MERGE_MODE` | `"concat_disjoint"` | 预测文件默认按不重叠日期拼接；重叠文件需显式使用 `"mean"` |
 | `WEIGHT_MODE` | `"equal"` | `equal`、`rank_linear` 或 `rank_square` |
 | `MAX_WEIGHT_MULTIPLE` | `2.0` | 非等权模式下单票权重上限相对等权的倍数 |

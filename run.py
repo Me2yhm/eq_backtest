@@ -61,6 +61,14 @@ def compute_returns(
     bm_aligned = bm_ret.reindex(portfolio_returns.index)
     excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
 
+    # Keep the merged-branch evaluation convention: the exclusion interval is
+    # removed only from the metric series, after the full backtest timeline has
+    # been simulated.
+    if exclude_period:
+        lo = pd.to_datetime(exclude_period[0])
+        hi = pd.to_datetime(exclude_period[1])
+        excess = excess[(excess.index < lo) | (excess.index >= hi)]
+
     return excess, turnover
 
 
@@ -134,6 +142,19 @@ def _build_portfolio_pnl_frame(
     benchmark = daily_benchmark.cumsum().rename("benchmark")
     close_count = close_counts["n_closed"].reindex(portfolio_returns.index).fillna(0).astype(int).rename("close_count")
 
+    if exclude_period:
+        lo = pd.to_datetime(exclude_period[0])
+        hi = pd.to_datetime(exclude_period[1])
+        keep = (daily_strategy.index < lo) | (daily_strategy.index >= hi)
+        all_pl = all_pl[keep]
+        alpha_pl = alpha_pl[keep]
+        benchmark = benchmark[keep]
+        daily_strategy = daily_strategy[keep]
+        daily_benchmark = daily_benchmark[keep]
+        daily_alpha = daily_alpha[keep]
+        daily_tto = daily_tto[keep]
+        close_count = close_count[keep]
+
     frame = pd.concat(
         [
             all_pl,
@@ -178,7 +199,7 @@ def evaluate_portfolio_result(
         turnover,
         bm_ret,
         is_short=is_short,
-        exclude_period=None,
+        exclude_period=cfg.EXCLUDE_PERIOD,
     )
     portfolio_pnl = _build_portfolio_pnl_frame(
         portfolio_returns=portfolio_returns,
@@ -187,7 +208,7 @@ def evaluate_portfolio_result(
         bm_ret=bm_ret,
         close_counts=close_counts,
         is_short=is_short,
-        exclude_period=None,
+        exclude_period=cfg.EXCLUDE_PERIOD,
     )
     metrics = portfolio_metrics(excess, compounding=compounding)
     metrics["Ann. Turnover"] = float(turnover.mean() * 242) if not turnover.empty else 0.0
@@ -270,7 +291,6 @@ def run() -> None:
         use_cache=cfg.USE_POOL_CACHE,
         cache_dir=cfg.POOL_CACHE_DIR,
         nosuspend_days=cfg.NOSUSPEND_DAYS,
-        exclude_period=cfg.EXCLUDE_PERIOD,
         prediction_merge_mode=cfg.PREDICTION_MERGE_MODE,
     )
 

@@ -105,7 +105,10 @@ def _normalize_symbol_column(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def _prediction_files(preds_dir: Path, horizons: list[str]) -> list[Path]:
-    files = sorted(preds_dir.rglob("*.parquet"))
+    # Keep the merged-branch contract: only prediction files directly under
+    # the configured directory participate in the backtest.  Recursing into
+    # sibling output directories can silently mix unrelated predictions.
+    files = sorted(preds_dir.glob("*.parquet"))
     if not files:
         raise FileNotFoundError(f"No parquet prediction files found in '{preds_dir}'")
     selected = [path for path in files if any(horizon in path.stem for horizon in horizons)]
@@ -131,76 +134,6 @@ def _filter_dates(frame: pl.DataFrame, datetime_column: str, start: str, end: st
     if end:
         out = out.filter(pl.col("__date") <= pl.lit(date.fromisoformat(end)))
     return out.drop("__date")
-
-
-def _filter_exclude_period(
-    frame: pl.DataFrame,
-    datetime_column: str,
-    exclude_period: tuple[str, str] | None,
-) -> pl.DataFrame:
-    """Remove an inclusive calendar-date interval from a frame."""
-    if not exclude_period or frame.is_empty():
-        return frame
-    lo = date.fromisoformat(str(exclude_period[0])[:10])
-    hi = date.fromisoformat(str(exclude_period[1])[:10])
-    if lo > hi:
-        raise ValueError(f"exclude_period start {lo} is after end {hi}")
-    frame_date = pl.col(datetime_column).dt.date()
-    return frame.filter(~frame_date.is_between(pl.lit(lo), pl.lit(hi), closed="both"))
-
-
-def _filter_benchmark_period(
-    series: pd.Series,
-    exclude_period: tuple[str, str] | None,
-) -> pd.Series:
-    if not exclude_period or series.empty:
-        return series
-    lo = pd.Timestamp(str(exclude_period[0])[:10]).date()
-    hi = pd.Timestamp(str(exclude_period[1])[:10]).date()
-    dates = pd.to_datetime(series.index).date
-    return series.loc[(dates < lo) | (dates > hi)]
-
-
-def _recompute_intraday_vwap_ret(frame: pl.DataFrame) -> pl.DataFrame:
-    """Compute next retained-bar VWAP return after any date filtering.
-
-    A symbol is only bridged when its next retained row is also the next
-    retained global bar.  Filtering an exclusion interval therefore creates
-    the intended direct pre-gap/post-gap transition, while ordinary missing
-    rows (for example a suspension) do not create a synthetic return.
-    """
-    if frame.is_empty():
-        return frame
-    bars = (
-        frame
-        .select("datetime")
-        .unique()
-        .sort("datetime")
-        .with_columns(pl.col("datetime").shift(-1).alias("__expected_next_datetime"))
-    )
-    out = (
-        frame
-        .sort(["datetime", "symbol"])
-        .with_columns([
-            pl.col("execution_vwap").shift(-1).over("symbol").alias("__next_vwap"),
-            pl.col("datetime").shift(-1).over("symbol").alias("__next_symbol_datetime"),
-        ])
-        .join(bars, on="datetime", how="left")
-        .with_columns(
-            pl
-            .when(
-                (pl.col("__next_symbol_datetime") == pl.col("__expected_next_datetime"))
-                & (pl.col("execution_vwap") > 0)
-                & pl.col("__next_vwap").is_not_null()
-                & (pl.col("__next_vwap") > 0)
-            )
-            .then(pl.col("__next_vwap") / pl.col("execution_vwap") - 1.0)
-            .otherwise(None)
-            .alias("vwap_ret")
-        )
-        .drop(["__next_vwap", "__next_symbol_datetime", "__expected_next_datetime"])
-    )
-    return out
 
 
 def _normalize_prediction_frame(frame: pl.DataFrame, frequency: str) -> pl.DataFrame:
@@ -263,16 +196,12 @@ def load_predictions(
     freq_cfg: dict,
     start: str,
     end: str | None = None,
-    exclude_period: tuple[str, str] | None = None,
     merge_mode: str = "concat_disjoint",
 ) -> pl.DataFrame:
     """Load every frequency into the canonical ``[datetime, symbol, pred]`` form."""
     frequency = _frequency_name(freq_cfg)
     files = _prediction_files(Path(freq_cfg["preds_dir"]), list(freq_cfg["horizons"]))
-    frames = [
-        _filter_exclude_period(_load_prediction_file(path, frequency, start, end), "datetime", exclude_period)
-        for path in files
-    ]
+    frames = [_load_prediction_file(path, frequency, start, end) for path in files]
     _validate_prediction_frames(frames, files, merge_mode)
     logger.info("{} predictions: {} file(s) loaded – {}", frequency, len(files), [path.name for path in files])
     combined = pl.concat(frames, how="vertical_relaxed")
@@ -338,7 +267,6 @@ def load_market_data_daily(
     universe: list[str] | None,
     allow_st_open: bool,
     nosuspend_days: int = 10,
-    exclude_period: tuple[str, str] | None = None,
 ) -> pl.DataFrame:
     """Read daily bars and normalize them to the common market schema."""
     frame = _normalize_symbol_column(pl.read_parquet(Path(freq_cfg["market_data"])))
@@ -369,7 +297,6 @@ def load_market_data_daily(
     frame = frame.filter(pl.col("date") >= pl.lit(start_date))
     if end:
         frame = frame.filter(pl.col("date") <= pl.lit(date.fromisoformat(end)))
-    frame = _filter_exclude_period(frame, "date", exclude_period)
     can_buy = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").fill_null(False).cast(pl.Boolean)
     can_sell = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").fill_null(False).cast(pl.Boolean)
     can_open_base = _can_open_base_expr(universe, allow_st_open, nosuspend_days)
@@ -457,7 +384,6 @@ def load_market_data_intraday(
     freq_cfg: dict,
     start: str,
     end: str | None,
-    exclude_period: tuple[str, str] | None = None,
 ) -> pl.DataFrame:
     """Read any intraday parquet into the common, flag-free schema."""
     path = Path(freq_cfg["market_data"])
@@ -503,8 +429,7 @@ def load_market_data_intraday(
         .collect()
         .sort(["datetime", "symbol"])
     )
-    frame = _filter_exclude_period(frame, "datetime", exclude_period)
-    return _recompute_intraday_vwap_ret(frame)
+    return frame
 
 
 def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
@@ -599,7 +524,6 @@ def _pool_cache_path(
     end: str | None,
     universe: list[str] | None,
     allow_st_open: bool,
-    exclude_period: tuple[str, str] | None,
     prediction_merge_mode: str,
 ) -> Path:
     payload = {
@@ -612,7 +536,6 @@ def _pool_cache_path(
         "end": end,
         "universe": list(universe) if universe is not None else None,
         "allow_st_open": allow_st_open,
-        "exclude_period": list(exclude_period) if exclude_period else None,
         "prediction_merge_mode": prediction_merge_mode,
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
@@ -639,7 +562,6 @@ def build_pool(
     use_cache: bool = True,
     cache_dir: Path | None = None,
     nosuspend_days: int = 10,
-    exclude_period: tuple[str, str] | None = None,
     prediction_merge_mode: str = "concat_disjoint",
 ) -> tuple[BacktestDataset, pd.Series]:
     """Build a canonical pool for daily, intraday, or 5-minute backtests."""
@@ -658,11 +580,9 @@ def build_pool(
         end,
         universe,
         allow_st_open,
-        exclude_period,
         prediction_merge_mode,
     )
     bm_ret = load_external_benchmark(cfg.EXTERNAL_NAV_PATH) if cfg.USE_EXTERNAL_BENCHMARK else load_benchmark(bm_path)
-    bm_ret = _filter_benchmark_period(bm_ret, exclude_period)
     if use_cache:
         cached = _read_cached_pool(cache_path)
         if cached is not None:
@@ -670,17 +590,11 @@ def build_pool(
             return cached, bm_ret
         logger.info("Pool cache: miss – {}", cache_path.name)
 
-    predictions = load_predictions(
-        freq_cfg,
-        start,
-        end,
-        exclude_period=exclude_period,
-        merge_mode=prediction_merge_mode,
-    )
+    predictions = load_predictions(freq_cfg, start, end, merge_mode=prediction_merge_mode)
     if frequency == "daily":
-        market = load_market_data_daily(freq_cfg, start, end, universe, allow_st_open, nosuspend_days, exclude_period)
+        market = load_market_data_daily(freq_cfg, start, end, universe, allow_st_open, nosuspend_days)
     else:
-        market = load_market_data_intraday(freq_cfg, start, end, exclude_period)
+        market = load_market_data_intraday(freq_cfg, start, end)
         flags = load_daily_flags(daily_path, start, end, universe, allow_st_open, nosuspend_days)
         _validate_columns(
             flags, {"limit_up_price", "limit_down_price"}, "Daily constraints parquet for intraday limit checks"

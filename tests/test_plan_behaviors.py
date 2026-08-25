@@ -7,39 +7,11 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 
-from data_loader import (
-    _filter_exclude_period,
-    _recompute_intraday_vwap_ret,
-    _validate_prediction_frames,
-)
+from data_loader import _validate_prediction_frames
 from research import signal_validation
 
 
 class PlanBehaviorTests(unittest.TestCase):
-    def test_exclude_period_is_inclusive_and_recomputes_cross_gap_return(self) -> None:
-        frame = pl.DataFrame({
-            "datetime": [
-                "2024-03-30 09:31:00",
-                "2024-03-31 09:31:00",
-                "2024-04-01 09:31:00",
-                "2024-04-01 09:36:00",
-            ],
-            "symbol": ["A", "A", "A", "A"],
-            "execution_vwap": [100.0, 105.0, 110.0, 111.0],
-            "vwap_ret": [0.0, 0.0, 0.0, 0.0],
-        }).with_columns(pl.col("datetime").str.to_datetime())
-        filtered = _filter_exclude_period(frame, "datetime", ("2024-03-31", "2024-03-31"))
-        result = _recompute_intraday_vwap_ret(filtered)
-
-        self.assertEqual(result["datetime"].dt.date().to_list(), [
-            pd.Timestamp("2024-03-30").date(),
-            pd.Timestamp("2024-04-01").date(),
-            pd.Timestamp("2024-04-01").date(),
-        ])
-        self.assertAlmostEqual(result["vwap_ret"][0], 0.10)
-        self.assertAlmostEqual(result["vwap_ret"][1], 111.0 / 110.0 - 1.0)
-        self.assertTrue(result["vwap_ret"][2] is None)
-
     def test_prediction_files_must_be_disjoint_by_default(self) -> None:
         first = pl.DataFrame({
             "datetime": [pd.Timestamp("2024-01-01")],
