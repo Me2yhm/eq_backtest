@@ -163,7 +163,7 @@ def parameter_sweep(
     *,
     splits: dict[str, tuple[str, str]],
     pool_sizes: tuple[int, ...] = (2200, 3300, 4400, 5500),
-    port_sizes: tuple[int, ...] = (200, 400, 800, 1200),
+    port_sizes: tuple[int, ...] = tuple(i for i in range(10, 100, 10)),
     buffers: tuple[int, ...] = (0, 100, 300, 600, 1000, 1200, 1400),
     costs: tuple[float, ...] = (0.00045,),
     weight_modes: tuple[str, ...] = ("equal",),
@@ -271,6 +271,12 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("research_output"))
     parser.add_argument("--validation-only", action="store_true")
     parser.add_argument("--include-weight-modes", action="store_true")
+    parser.add_argument(
+        "--no-sort-sweep-by-return",
+        dest="sort_sweep_by_return",
+        action="store_false",
+        help="参数寻优输出不按收益率降序排序（默认按收益率降序排序）",
+    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -299,8 +305,13 @@ def main() -> None:
             splits={"tune_2024": ("2024-01-01", "2025-01-01"), "test_2025": ("2025-01-01", "2026-01-01")},
             weight_modes=weight_modes,
         )
+        if args.sort_sweep_by_return and not sweep.empty and "Ann. Return" in sweep.columns:
+            sweep = sweep.sort_values("Ann. Return", ascending=False)
         sweep.to_csv(args.output_dir / "parameter_sweep.csv", index=False)
-        select_robust_candidates(sweep).to_csv(args.output_dir / "parameter_sweep_candidates.csv", index=False)
+        candidates = select_robust_candidates(sweep)
+        if args.sort_sweep_by_return and not candidates.empty and "Ann. Return" in candidates.columns:
+            candidates = candidates.sort_values("Ann. Return", ascending=False)
+        candidates.to_csv(args.output_dir / "parameter_sweep_candidates.csv", index=False)
 
 
 if __name__ == "__main__":
