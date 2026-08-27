@@ -13,7 +13,7 @@ import pandas as pd
 import polars as pl
 from loguru import logger
 
-POOL_CACHE_VERSION = 7
+POOL_CACHE_VERSION = 8
 _BASE_COLUMNS = {
     "datetime",
     "date",
@@ -260,6 +260,108 @@ def _validate_columns(frame: pl.DataFrame, required: set[str], context: str) -> 
         raise ValueError(f"{context} is missing required columns: {missing}")
 
 
+def _resolve_daily_price_column(
+    frame: pl.DataFrame,
+    configured: str | None,
+    candidates: tuple[str, ...],
+    field_name: str,
+) -> str | None:
+    """Resolve a daily price field while accepting case-only source differences."""
+    available_by_lower = {column.lower(): column for column in frame.columns}
+    if configured is not None:
+        if not isinstance(configured, str) or not configured.strip():
+            raise ValueError(f"Daily market_columns.{field_name} must be a non-empty column name or null")
+        resolved = available_by_lower.get(configured.lower())
+        if resolved is None:
+            raise ValueError(
+                f"Daily market parquet is missing configured {field_name} column '{configured}'. "
+                f"Available columns: {frame.columns}"
+            )
+        return resolved
+
+    for candidate in candidates:
+        resolved = available_by_lower.get(candidate.lower())
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _attach_daily_price_fields(frame: pl.DataFrame, freq_cfg: dict) -> pl.DataFrame:
+    """Attach the price path consumed by the common share-based simulator.
+
+    With real daily prices the external convention is:
+    previous close -> current VWAP30 -> current close.
+    The legacy return-only fallback remains available only when no daily price
+    columns are configured; it is deliberately not used by the vwap30 config.
+    """
+    source_columns = freq_cfg.get("market_columns") or {}
+    execution_column = _resolve_daily_price_column(
+        frame,
+        source_columns.get("execution_vwap"),
+        ("vwap30", "VWAP30"),
+        "execution_vwap",
+    )
+    close_column = _resolve_daily_price_column(
+        frame,
+        source_columns.get("bar_close"),
+        ("close_ex", "close"),
+        "bar_close",
+    )
+    previous_close_column = _resolve_daily_price_column(
+        frame,
+        source_columns.get("prev_close"),
+        (),
+        "prev_close",
+    )
+
+    if execution_column is None and close_column is None:
+        return frame.with_columns(
+            pl.lit(1.0).alias("execution_vwap"),
+            pl.lit(1.0).alias("prev_close"),
+            (pl.lit(1.0) + pl.col("ret")).alias("bar_close"),
+        )
+    if execution_column is None or close_column is None:
+        raise ValueError(
+            "Daily VWAP30 mode requires both market_columns.execution_vwap and "
+            "market_columns.bar_close. Expected source columns such as 'vwap30' and 'close_ex'."
+        )
+
+    # Derive the previous adjusted close before the requested start-date cut,
+    # so the first evaluated day can still use the prior row when available.
+    ordered = frame.sort(["symbol", "date"])
+    if previous_close_column is not None:
+        return ordered.with_columns(
+            pl.col(execution_column).cast(pl.Float64).alias("execution_vwap"),
+            pl.col(close_column).cast(pl.Float64).alias("bar_close"),
+            pl.col(previous_close_column).cast(pl.Float64).alias("prev_close"),
+        )
+
+    # Do not bridge a symbol gap caused by missing/suspended rows. This matches
+    # the external panel calculation, which only rolls one global trading date.
+    all_dates = ordered["date"].unique().sort().to_list()
+    previous_date_by_date = {all_dates[index]: all_dates[index - 1] for index in range(1, len(all_dates))}
+    return (
+        ordered
+        .with_columns(
+            pl.col(execution_column).cast(pl.Float64).alias("execution_vwap"),
+            pl.col(close_column).cast(pl.Float64).alias("bar_close"),
+            pl.col(close_column).cast(pl.Float64).shift(1).over("symbol").alias("prev_close_raw"),
+            pl.col("date").shift(1).over("symbol").alias("prev_symbol_date"),
+        )
+        .with_columns(pl.col("date").replace_strict(previous_date_by_date, default=None).alias("expected_prev_date"))
+        .with_columns(
+            pl.when(
+                pl.col("expected_prev_date").is_null()
+                | (pl.col("prev_symbol_date") != pl.col("expected_prev_date"))
+            )
+            .then(None)
+            .otherwise(pl.col("prev_close_raw"))
+            .alias("prev_close")
+        )
+        .drop(["prev_close_raw", "prev_symbol_date", "expected_prev_date"])
+    )
+
+
 def load_market_data_daily(
     freq_cfg: dict,
     start: str,
@@ -293,6 +395,7 @@ def load_market_data_daily(
         frame = frame.with_columns(pl.col("date").str.strptime(pl.Date, strict=False))
     else:
         frame = frame.with_columns(pl.col("date").cast(pl.Date))
+    frame = _attach_daily_price_fields(frame, freq_cfg)
     start_date = date.fromisoformat(start)
     frame = frame.filter(pl.col("date") >= pl.lit(start_date))
     if end:
@@ -305,12 +408,6 @@ def load_market_data_daily(
         .with_columns(
             pl.col("date").cast(pl.Datetime).alias("datetime"),
             pl.col("ret").alias("vwap_ret"),
-            # Daily bars have no execution-price decomposition.  A unit VWAP
-            # and close=1+ret preserves the daily weight-return P&L in the
-            # common share-based simulator.
-            pl.lit(1.0).alias("execution_vwap"),
-            pl.lit(1.0).alias("prev_close"),
-            (pl.lit(1.0) + pl.col("ret")).alias("bar_close"),
             can_trade_buy=can_buy,
             can_trade_sell=can_sell,
             can_open_base=can_open_base,
@@ -537,6 +634,7 @@ def _pool_cache_path(
         "universe": list(universe) if universe is not None else None,
         "allow_st_open": allow_st_open,
         "prediction_merge_mode": prediction_merge_mode,
+        "market_columns": freq_cfg.get("market_columns", {}),
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
     return cache_dir / f"pool_{_frequency_name(freq_cfg)}_{digest}.parquet"

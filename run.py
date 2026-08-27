@@ -310,7 +310,7 @@ def run() -> None:
             thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
             size_cut=cfg.POOL_SIZE,
             close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
-            trade_on_next_bar=cfg.TRADE_ON_NEXT_BAR,
+            trade_on_next_bar=cfg.trade_on_next_bar_for(cfg.FREQUENCY),
             strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
             is_short=cfg.IS_SHORT,
             output_dir=output_dir,

@@ -193,7 +193,7 @@ def parameter_sweep(
                 frequency=cfg.FREQUENCY,
                 agg_mode=cfg.AGG_MODE,
                 is_short=cfg.IS_SHORT,
-                trade_on_next_bar=cfg.TRADE_ON_NEXT_BAR,
+                trade_on_next_bar=cfg.trade_on_next_bar_for(cfg.FREQUENCY),
                 strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
                 close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
                 cost_per_turnover=cost,

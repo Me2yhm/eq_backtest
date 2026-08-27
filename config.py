@@ -31,7 +31,8 @@ _DEFAULTS: dict = {
             "market_data": "/ext/eq_data/daily_with_limit_prevcap.pqt",
             "preds_dir": "data/preds_size",
             "horizons": ["3d", "5d", "10d"],
-            "market_columns": {"execution_vwap": None, "bar_close": None},
+            "market_columns": {"execution_vwap": "vwap30", "bar_close": "close_ex", "prev_close": None},
+            "trade_on_next_bar": True,
         },
         "15min": {
             "market_data": "/ext/eq_data/15min_bar_full_left_close.parquet",
@@ -189,3 +190,8 @@ DEBUG_DATETIME: str = _cfg["debug_datetime"]
 # ── Eligibility and output ────────────────────────────────────────────────────
 NOSUSPEND_DAYS: int = _cfg["nosuspend_days"]
 OUTPUT_DIR: Path = Path(f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}_{FREQUENCY}")
+
+
+def trade_on_next_bar_for(frequency: str) -> bool:
+    """Return the frequency-specific execution-lag setting."""
+    return bool(FREQ_CONFIG.get(frequency, {}).get("trade_on_next_bar", TRADE_ON_NEXT_BAR))

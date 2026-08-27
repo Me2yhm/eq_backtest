@@ -165,6 +165,7 @@ def _simulate_portfolio_core(
     current_shares = np.zeros(n_symbols, dtype=np.float64)  # 持仓股数
 
     current_row = np.full(n_symbols, -1, dtype=np.int64)
+    signal_row_by_symbol = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
     signal_in_size_pool = np.zeros(n_symbols, dtype=np.bool_)
     # Actual holdings can temporarily exceed port_size because T+1 frozen names
@@ -242,6 +243,7 @@ def _simulate_portfolio_core(
                 frozen_weights[symbol_id] = 0.0
 
         current_row[:] = -1
+        signal_row_by_symbol[:] = -1
         rank_by_symbol[:] = 0
         signal_in_size_pool[:] = False
 
@@ -309,6 +311,11 @@ def _simulate_portfolio_core(
                     debug_can_open_exec = 1
 
         if has_signal:
+            signal_start = bar_offsets[signal_bar_idx]
+            signal_end = bar_offsets[signal_bar_idx + 1]
+            for signal_row_idx in range(signal_start, signal_end):
+                signal_row_by_symbol[row_symbol_ids[signal_row_idx]] = signal_row_idx
+
             rank = 0
             order_start = sorted_offsets[signal_bar_idx]
             order_end = sorted_offsets[signal_bar_idx + 1]
@@ -669,8 +676,21 @@ def _simulate_portfolio_core(
                     if row_idx == -1:
                         continue
                     v = execution_vwap[row_idx]
-                    if v > 0 and np.isfinite(v):
-                        current_shares[symbol_id] = portfolio_sign * current_weights[symbol_id] * portfolio_value / v
+                    share_price = v
+                    # The external daily engine creates target shares from the
+                    # signal-day close_ex, then executes those shares at the
+                    # next day's VWAP30. For same-bar execution the execution
+                    # VWAP remains the correct share-conversion price.
+                    if trade_on_next_bar:
+                        signal_row_idx = signal_row_by_symbol[symbol_id]
+                        if signal_row_idx != -1:
+                            signal_close = bar_close[signal_row_idx]
+                            if signal_close > 0 and np.isfinite(signal_close):
+                                share_price = signal_close
+                    if share_price > 0 and np.isfinite(share_price):
+                        current_shares[symbol_id] = (
+                            portfolio_sign * current_weights[symbol_id] * portfolio_value / share_price
+                        )
             # 清仓股票 shares 归零
             for i in range(prev_count):
                 symbol_id = prev_symbols[i]

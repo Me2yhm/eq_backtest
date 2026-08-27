@@ -79,7 +79,8 @@ eq-backtest/
 | `PORT_SIZES` | `[900]` | 实际持仓数量列表，支持多组并行回测 |
 | `THRESH_OUT_BUFFER` | `500` | 退出缓冲（持仓滑出排名 `port_size + buffer` 才平仓） |
 | `FREQUENCY` | `"15min"` | 可选 `"daily"`、`"15min"` 或 `"5min"`；对应路径、预测目录和 horizon 由 `FREQ_CONFIG` 提供 |
-| `TRADE_ON_NEXT_BAR` | `True` | `True`：信号在下一 bar 执行；日频时一 bar 即一天 |
+| `TRADE_ON_NEXT_BAR` | `False` | 通用默认值；daily 在 `FREQ_CONFIG["daily"]` 中单独设为 `True`，15min/5min 继续使用此默认值 |
+| `FREQ_CONFIG["daily"]["market_columns"]` | `vwap30` / `close_ex` | 日频收益按上一日 `close_ex` → 当日 `vwap30` → 当日 `close_ex` 两段计算；数据文件需包含这两列 |
 | `STRICT_FIRST_BAR_TOP_N` | `False` | `True`：首个执行 bar 只允许严格 top-N 信号开仓 |
 | `COST_PER_TURNOVER` | `0.00045` | 单边交易成本（每换手单位扣减） |
 | `EXCLUDE_PERIOD` | `("2024-01-01","2024-03-31")` | 仅从最终评价指标序列中剔除 `[start, end)` 区间；行情、预测、持仓和调仓时间轴保持完整，设为 `None` 关闭 |
