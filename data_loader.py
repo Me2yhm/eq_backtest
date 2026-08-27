@@ -13,7 +13,7 @@ import pandas as pd
 import polars as pl
 from loguru import logger
 
-POOL_CACHE_VERSION = 8
+POOL_CACHE_VERSION = 9
 _BASE_COLUMNS = {
     "datetime",
     "date",
@@ -254,6 +254,36 @@ def _can_open_base_expr(universe: list[str] | None, allow_st_open: bool, nosuspe
     return expression
 
 
+def _rank_size_over_scope(
+    frame: pl.DataFrame,
+    universe: list[str] | None,
+    nosuspend_days: int,
+) -> pl.DataFrame:
+    """Recompute ``size_rank`` over the eligible scope only.
+
+    The external universe excludes ST / not-yet-listed / insufficient-normal-days
+    names, so those rows must not occupy rank slots.  Ranking over the
+    unfiltered frame inflates every remaining rank and breaks the reference
+    alignment (external sell threshold 1400 no longer maps onto a stable local
+    boundary).  Ineligible rows are set to ``size_rank = 999999`` so they stay
+    outside the size pool, matching :func:`load_daily_flags` semantics.
+    """
+    rank_scope = _can_open_base_expr(universe, False, nosuspend_days)
+    eligible_ranked = (
+        frame
+        .filter(rank_scope)
+        .select(["date", "symbol", "log_size"])
+        .with_columns(pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank"))
+        .select(["date", "symbol", "size_rank"])
+    )
+    return (
+        frame
+        .drop("size_rank")
+        .join(eligible_ranked, on=["date", "symbol"], how="left")
+        .with_columns(pl.col("size_rank").fill_null(999999).cast(pl.Int32))
+    )
+
+
 def _validate_columns(frame: pl.DataFrame, required: set[str], context: str) -> None:
     missing = sorted(required.difference(frame.columns))
     if missing:
@@ -350,10 +380,8 @@ def _attach_daily_price_fields(frame: pl.DataFrame, freq_cfg: dict) -> pl.DataFr
         )
         .with_columns(pl.col("date").replace_strict(previous_date_by_date, default=None).alias("expected_prev_date"))
         .with_columns(
-            pl.when(
-                pl.col("expected_prev_date").is_null()
-                | (pl.col("prev_symbol_date") != pl.col("expected_prev_date"))
-            )
+            pl
+            .when(pl.col("expected_prev_date").is_null() | (pl.col("prev_symbol_date") != pl.col("expected_prev_date")))
             .then(None)
             .otherwise(pl.col("prev_close_raw"))
             .alias("prev_close")
@@ -400,6 +428,10 @@ def load_market_data_daily(
     frame = frame.filter(pl.col("date") >= pl.lit(start_date))
     if end:
         frame = frame.filter(pl.col("date") <= pl.lit(date.fromisoformat(end)))
+    # 排序域对齐外部：剔除 ST / 上市不满 / normal_days 不足的票后，再对 log_size
+    # 排名。文件内现成的 size_rank 把 ST 等票也计入排名，会挤占 rank 位次、把
+    # 其余票的 rank 系统性顶大（外部 sell@1400 映射到本地 ~1000 的根因）。
+    frame = _rank_size_over_scope(frame, universe, nosuspend_days)
     can_buy = (pl.col("turnover") > 0) & ~pl.col("is_limit_up").fill_null(False).cast(pl.Boolean)
     can_sell = (pl.col("turnover") > 0) & ~pl.col("is_limit_down").fill_null(False).cast(pl.Boolean)
     can_open_base = _can_open_base_expr(universe, allow_st_open, nosuspend_days)
@@ -439,23 +471,10 @@ def load_daily_flags(
     if end:
         frame = frame.filter(pl.col("date") <= pl.lit(date.fromisoformat(end)))
     base = _can_open_base_expr(universe, allow_st_open, nosuspend_days)
-    rank_scope = _can_open_base_expr(universe, False, nosuspend_days)
     base_frame = frame.with_columns(base.alias("can_open_base"))
     # Rank only the eligible universe.  Applying rank before masking ineligible
     # rows changes every remaining rank and breaks the reference portfolio.
-    eligible_ranked = (
-        base_frame
-        .filter(rank_scope)
-        .select(["date", "symbol", "log_size"])
-        .with_columns(pl.col("log_size").rank(descending=True).over("date").cast(pl.Int32).alias("size_rank"))
-        .select(["date", "symbol", "size_rank"])
-    )
-    ranked = (
-        base_frame
-        .drop("size_rank")
-        .join(eligible_ranked, on=["date", "symbol"], how="left")
-        .with_columns(pl.col("size_rank").fill_null(999999).cast(pl.Int32))
-    )
+    ranked = _rank_size_over_scope(base_frame, universe, nosuspend_days)
     keep = [
         column
         for column in [
