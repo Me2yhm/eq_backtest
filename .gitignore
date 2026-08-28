@@ -154,3 +154,9 @@ ext_scripts/
 
 *_output
 *_output_*
+
+docs
+
+tmp/
+
+*.db
