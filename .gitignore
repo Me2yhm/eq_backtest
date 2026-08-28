@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Local configuration (git-ignored — defaults are in config.py)
+config.yml
+
 # Distribution / packaging
 .Python
 archive/
@@ -145,6 +148,15 @@ data_*/
 output_*
 
 *draft*
+*.rar
+tmp/
+ext_scripts/
+
+*_output
+*_output_*
+
+docs
 
 tmp/
+
 *.db

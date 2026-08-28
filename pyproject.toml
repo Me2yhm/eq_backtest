@@ -15,5 +15,12 @@ dependencies = [
     "loguru>=0.7.3",
 ]
 
+
+
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple"
+
+[tool.uv.workspace]
+members = [
+    "backtest_verify",
+]
