@@ -7,13 +7,14 @@ import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import polars as pl
 from loguru import logger
 
-POOL_CACHE_VERSION = 9
+POOL_CACHE_VERSION = 10
 _BASE_COLUMNS = {
     "datetime",
     "date",
@@ -69,6 +70,15 @@ class BacktestDataset:
     sort_cache: dict[bool, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class PredictionSource:
+    """One explicitly selected prediction parquet and its allowed date interval."""
+
+    path: Path
+    start: str | None = None
+    end: str | None = None
+
+
 def load_benchmark(path: Path) -> pd.Series:
     frame = pl.read_csv(path)
     if "date" not in frame.columns:
@@ -120,6 +130,82 @@ def _prediction_files(preds_dir: Path, horizons: list[str]) -> list[Path]:
     raise FileNotFoundError(f"No prediction files in '{preds_dir}' match horizons {horizons}")
 
 
+def _as_iso_date(value: Any, field_name: str) -> str | None:
+    """Validate a YAML date-like value and return its ISO-8601 representation."""
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value.isoformat()
+    if not isinstance(value, str):
+        raise ValueError(f"prediction_sources.{field_name} must be an ISO date string or null")
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"prediction_sources.{field_name} must be an ISO date, got {value!r}") from exc
+    return value
+
+
+def _prediction_sources(freq_cfg: dict) -> list[PredictionSource]:
+    """Resolve explicit source selections or preserve legacy horizon-based discovery.
+
+    ``prediction_sources`` is an exact user-supplied list. Entries are a direct
+    parquet filename or a mapping with ``file`` and optional inclusive ``start``
+    / ``end`` bounds. Relative filenames must live directly in ``preds_dir``.
+    """
+    preds_dir = Path(freq_cfg["preds_dir"])
+    raw_sources = freq_cfg.get("prediction_sources")
+    if raw_sources is None:
+        return [PredictionSource(path) for path in _prediction_files(preds_dir, list(freq_cfg["horizons"]))]
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise ValueError("freq_config.<frequency>.prediction_sources must be a non-empty list or null")
+
+    resolved_dir = preds_dir.resolve()
+    sources: list[PredictionSource] = []
+    for index, raw_source in enumerate(raw_sources):
+        if isinstance(raw_source, str):
+            file_value, start, end = raw_source, None, None
+        elif isinstance(raw_source, dict):
+            unexpected = set(raw_source).difference({"file", "start", "end"})
+            if unexpected:
+                raise ValueError(
+                    f"prediction_sources[{index}] has unsupported keys: {sorted(unexpected)}; "
+                    "expected file, start, end"
+                )
+            file_value = raw_source.get("file")
+            start = _as_iso_date(raw_source.get("start"), f"[{index}].start")
+            end = _as_iso_date(raw_source.get("end"), f"[{index}].end")
+        else:
+            raise ValueError(f"prediction_sources[{index}] must be a filename or mapping")
+
+        if not isinstance(file_value, str) or not file_value:
+            raise ValueError(f"prediction_sources[{index}].file must be a non-empty parquet filename")
+        if start and end and start > end:
+            raise ValueError(f"prediction_sources[{index}] has start after end: {start} > {end}")
+
+        path = Path(file_value)
+        path = path if path.is_absolute() else preds_dir / path
+        path = path.resolve()
+        if path.parent != resolved_dir:
+            raise ValueError(f"prediction_sources[{index}].file must be directly inside '{preds_dir}'")
+        if path.suffix != ".parquet":
+            raise ValueError(f"prediction_sources[{index}].file must name a .parquet file")
+        if not path.is_file():
+            raise FileNotFoundError(f"Selected prediction file does not exist: '{path}'")
+        sources.append(PredictionSource(path=path, start=start, end=end))
+    return sources
+
+
+def _combine_date_bounds(
+    start: str,
+    end: str | None,
+    source: PredictionSource,
+) -> tuple[str, str | None]:
+    """Intersect run-level and source-level inclusive date bounds."""
+    effective_start = max(start, source.start) if source.start else start
+    effective_end = min(end, source.end) if end and source.end else (end or source.end)
+    return effective_start, effective_end
+
+
 def _as_datetime(frame: pl.DataFrame, column: str) -> pl.DataFrame:
     dtype = frame[column].dtype
     if dtype == pl.String:
@@ -145,6 +231,11 @@ def _normalize_prediction_frame(frame: pl.DataFrame, frequency: str) -> pl.DataF
                 "stock_code": "symbol",
                 "prediction": "pred",
             }),
+            "datetime",
+        )
+    if {"date", "symbol", "prediction"}.issubset(columns):
+        return _as_datetime(
+            frame.select(["date", "symbol", "prediction"]).rename({"date": "datetime", "prediction": "pred"}),
             "datetime",
         )
     frame = (
@@ -197,13 +288,23 @@ def load_predictions(
     start: str,
     end: str | None = None,
     merge_mode: str = "concat_disjoint",
+    sources: list[PredictionSource] | None = None,
 ) -> pl.DataFrame:
     """Load every frequency into the canonical ``[datetime, symbol, pred]`` form."""
     frequency = _frequency_name(freq_cfg)
-    files = _prediction_files(Path(freq_cfg["preds_dir"]), list(freq_cfg["horizons"]))
-    frames = [_load_prediction_file(path, frequency, start, end) for path in files]
+    resolved_sources = sources if sources is not None else _prediction_sources(freq_cfg)
+    frames = []
+    for source in resolved_sources:
+        source_start, source_end = _combine_date_bounds(start, end, source)
+        frames.append(_load_prediction_file(source.path, frequency, source_start, source_end))
+    files = [source.path for source in resolved_sources]
     _validate_prediction_frames(frames, files, merge_mode)
-    logger.info("{} predictions: {} file(s) loaded – {}", frequency, len(files), [path.name for path in files])
+    logger.info(
+        "{} predictions: {} source(s) loaded – {}",
+        frequency,
+        len(resolved_sources),
+        [f"{source.path.name}[{source.start or '-'}:{source.end or '-'}]" for source in resolved_sources],
+    )
     combined = pl.concat(frames, how="vertical_relaxed")
     if merge_mode == "mean":
         combined = combined.group_by(["datetime", "symbol"], maintain_order=True).agg(
@@ -222,8 +323,16 @@ def _load_prediction_file(path: Path, frequency: str, start: str, end: str | Non
     columns = set(schema)
     if {"trade_date", "stock_code", "prediction"}.issubset(columns):
         lazy = pl.scan_parquet(path).select([
-            pl.col("trade_date").cast(pl.Datetime).alias("datetime"),
+            pl.col("trade_date").alias("datetime"),
             pl.col("stock_code").alias("symbol"),
+            pl.col("prediction").alias("pred"),
+        ])
+    elif {"date", "symbol", "prediction"}.issubset(columns):
+        # Daily production predictions: date, symbol, prediction, label.
+        # ``label`` is intentionally excluded: it is not a tradable signal.
+        lazy = pl.scan_parquet(path).select([
+            pl.col("date").alias("datetime"),
+            pl.col("symbol"),
             pl.col("prediction").alias("pred"),
         ])
     elif {"datetime", "symbol", "pred"}.issubset(columns):
@@ -635,11 +744,12 @@ def _pool_cache_path(
     cache_dir: Path,
     freq_cfg: dict,
     daily_path: Path,
-    pred_files: list[Path],
+    prediction_sources: list[PredictionSource],
     start: str,
     end: str | None,
     universe: list[str] | None,
     allow_st_open: bool,
+    nosuspend_days: int,
     prediction_merge_mode: str,
 ) -> Path:
     payload = {
@@ -647,11 +757,15 @@ def _pool_cache_path(
         "frequency": _frequency_name(freq_cfg),
         "market": _file_signature(Path(freq_cfg["market_data"])),
         "daily_flags": _file_signature(daily_path),
-        "predictions": [_file_signature(path) for path in pred_files],
+        "prediction_sources": [
+            {"file": _file_signature(source.path), "start": source.start, "end": source.end}
+            for source in prediction_sources
+        ],
         "start": start,
         "end": end,
         "universe": list(universe) if universe is not None else None,
         "allow_st_open": allow_st_open,
+        "nosuspend_days": nosuspend_days,
         "prediction_merge_mode": prediction_merge_mode,
         "market_columns": freq_cfg.get("market_columns", {}),
     }
@@ -686,17 +800,18 @@ def build_pool(
 
     frequency = _frequency_name(freq_cfg)
     daily_path = Path(cfg.FREQ_CONFIG["daily"]["market_data"])
-    pred_files = _prediction_files(Path(freq_cfg["preds_dir"]), list(freq_cfg["horizons"]))
+    prediction_sources = _prediction_sources(freq_cfg)
     resolved_cache_dir = cache_dir or Path(freq_cfg["market_data"]).parent / ".cache"
     cache_path = _pool_cache_path(
         resolved_cache_dir,
         freq_cfg,
         daily_path,
-        pred_files,
+        prediction_sources,
         start,
         end,
         universe,
         allow_st_open,
+        nosuspend_days,
         prediction_merge_mode,
     )
     bm_ret = load_external_benchmark(cfg.EXTERNAL_NAV_PATH) if cfg.USE_EXTERNAL_BENCHMARK else load_benchmark(bm_path)
@@ -707,7 +822,13 @@ def build_pool(
             return cached, bm_ret
         logger.info("Pool cache: miss – {}", cache_path.name)
 
-    predictions = load_predictions(freq_cfg, start, end, merge_mode=prediction_merge_mode)
+    predictions = load_predictions(
+        freq_cfg,
+        start,
+        end,
+        merge_mode=prediction_merge_mode,
+        sources=prediction_sources,
+    )
     if frequency == "daily":
         market = load_market_data_daily(freq_cfg, start, end, universe, allow_st_open, nosuspend_days)
     else:

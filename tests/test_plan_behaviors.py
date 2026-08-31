@@ -1,17 +1,65 @@
 from __future__ import annotations
 
+import importlib.util
+import os
+import sys
 import unittest
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import polars as pl
 
-from data_loader import _attach_daily_price_fields, _validate_prediction_frames
+from data_loader import (
+    _attach_daily_price_fields,
+    _pool_cache_path,
+    _prediction_sources,
+    _validate_prediction_frames,
+    load_predictions,
+)
 from research import signal_validation
 
 
 class PlanBehaviorTests(unittest.TestCase):
+    def test_run_directory_config_owns_relative_paths_and_output(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp).resolve()
+            (run_dir / "config.yml").write_text(
+                """
+frequency: daily
+bm_path: benchmark.csv
+external_nav_path: nav.parquet
+pool_cache_dir: cache
+freq_config:
+  daily:
+    market_data: market.parquet
+    preds_dir: predictions
+""".lstrip(),
+                encoding="utf-8",
+            )
+            module_name = "_isolated_run_config_test"
+            spec = importlib.util.spec_from_file_location(module_name, Path(__file__).parents[1] / "config.py")
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            try:
+                with patch.dict(os.environ, {"EQ_BACKTEST_RUN_DIR": str(run_dir)}):
+                    spec.loader.exec_module(module)
+            finally:
+                sys.modules.pop(module_name, None)
+
+            self.assertEqual(module.RUN_DIR, run_dir)
+            self.assertEqual(module.CONFIG_PATH, run_dir / "config.yml")
+            self.assertEqual(module.BM_PATH, run_dir / "benchmark.csv")
+            self.assertEqual(module.EXTERNAL_NAV_PATH, run_dir / "nav.parquet")
+            self.assertEqual(module.POOL_CACHE_DIR, run_dir / "cache")
+            self.assertEqual(module.FREQ_CONFIG["daily"]["market_data"], run_dir / "market.parquet")
+            self.assertEqual(module.FREQ_CONFIG["daily"]["preds_dir"], run_dir / "predictions")
+            self.assertEqual(module.OUTPUT_DIR, run_dir / "output_long_4400_daily")
+
     def test_daily_vwap30_price_path_derives_previous_close(self) -> None:
         frame = pl.DataFrame(
             {
@@ -59,6 +107,102 @@ class PlanBehaviorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _validate_prediction_frames([first, first], [Path("a.parquet"), Path("b.parquet")], "concat_disjoint")
         _validate_prediction_frames([first, first], [Path("a.parquet"), Path("b.parquet")], "mean")
+
+    def test_daily_production_sources_normalize_and_clip_before_concat(self) -> None:
+        with TemporaryDirectory() as tmp:
+            preds_dir = Path(tmp)
+            first_path = preds_dir / "predictions_v6_2024.parquet"
+            second_path = preds_dir / "predictions_v6_2025.parquet"
+            pl.DataFrame({
+                "date": ["2024-01-01", "2024-01-02"],
+                "symbol": ["A", "A"],
+                "prediction": [1.0, 2.0],
+                "label": [0.1, 0.2],
+            }).write_parquet(first_path)
+            pl.DataFrame({
+                "date": ["2024-01-02", "2024-01-03"],
+                "symbol": ["A", "A"],
+                "prediction": [3.0, 4.0],
+                "label": [0.3, 0.4],
+            }).write_parquet(second_path)
+            freq_cfg = {
+                "market_data": "daily_market.parquet",
+                "preds_dir": str(preds_dir),
+                "horizons": [],
+                "prediction_sources": [
+                    {"file": first_path.name, "end": "2024-01-01"},
+                    {"file": second_path.name, "start": "2024-01-02"},
+                ],
+            }
+
+            sources = _prediction_sources(freq_cfg)
+            result = load_predictions(freq_cfg, "2024-01-01", "2024-01-03", sources=sources)
+
+            self.assertEqual(result.columns, ["datetime", "symbol", "pred"])
+            self.assertEqual(result["datetime"].dt.strftime("%Y-%m-%d").to_list(), [
+                "2024-01-01",
+                "2024-01-02",
+                "2024-01-03",
+            ])
+            self.assertEqual(result["pred"].to_list(), [1.0, 3.0, 4.0])
+
+            market_path = preds_dir / "daily_market.parquet"
+            pl.DataFrame({"date": ["2024-01-01"]}).write_parquet(market_path)
+            cache_freq_cfg = {**freq_cfg, "market_data": str(market_path)}
+            cache_a = _pool_cache_path(
+                preds_dir / "cache",
+                cache_freq_cfg,
+                market_path,
+                sources,
+                "2024-01-01",
+                "2024-01-03",
+                None,
+                False,
+                10,
+                "concat_disjoint",
+            )
+            changed_sources = _prediction_sources({
+                **freq_cfg,
+                "prediction_sources": [
+                    {"file": first_path.name, "end": "2024-01-02"},
+                    {"file": second_path.name, "start": "2024-01-03"},
+                ],
+            })
+            cache_b = _pool_cache_path(
+                preds_dir / "cache",
+                cache_freq_cfg,
+                market_path,
+                changed_sources,
+                "2024-01-01",
+                "2024-01-03",
+                None,
+                False,
+                10,
+                "concat_disjoint",
+            )
+            self.assertNotEqual(cache_a, cache_b)
+
+    def test_daily_production_sources_reject_overlapping_selection(self) -> None:
+        with TemporaryDirectory() as tmp:
+            preds_dir = Path(tmp)
+            first_path = preds_dir / "predictions_v6_2024.parquet"
+            second_path = preds_dir / "predictions_v6_2025.parquet"
+            for path, prediction in ((first_path, 1.0), (second_path, 2.0)):
+                pl.DataFrame({
+                    "date": ["2024-01-02"],
+                    "symbol": ["A"],
+                    "prediction": [prediction],
+                    "label": [0.0],
+                }).write_parquet(path)
+            freq_cfg = {
+                "market_data": "daily_market.parquet",
+                "preds_dir": str(preds_dir),
+                "horizons": [],
+                "prediction_sources": [first_path.name, second_path.name],
+            }
+
+            with self.assertRaisesRegex(ValueError, "overlap"):
+                load_predictions(freq_cfg, "2024-01-01", "2024-01-03")
 
     def test_signal_validation_uses_same_timestamp_and_three_layers(self) -> None:
         rows = []

@@ -3,17 +3,47 @@ Backtest entry point.
 
 Usage
 -----
-    python run.py
+    python run.py runs/my-backtest
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 import polars as pl
 from loguru import logger
+
+
+def _configure_run_directory() -> None:
+    """Require an isolated run directory before importing its configuration."""
+    parser = argparse.ArgumentParser(description="Run an isolated EQ backtest")
+    parser.add_argument(
+        "run_dir",
+        type=Path,
+        help="Existing directory that contains this run's config.yml and receives its results.",
+    )
+    args = parser.parse_args()
+    run_dir = args.run_dir.expanduser()
+    if not run_dir.is_absolute():
+        run_dir = Path.cwd() / run_dir
+    run_dir = run_dir.resolve()
+    repo_dir = Path(__file__).resolve().parent
+    if run_dir == repo_dir:
+        parser.error("run_dir must be a dedicated directory outside the repository root")
+    if not run_dir.is_dir():
+        parser.error(f"run directory does not exist: {run_dir}")
+    if not (run_dir / "config.yml").is_file():
+        parser.error(f"run directory is missing config.yml: {run_dir}")
+    os.environ["EQ_BACKTEST_RUN_DIR"] = str(run_dir)
+
+
+if __name__ == "__main__":
+    _configure_run_directory()
+
 
 import config as cfg
 from data_loader import build_pool
@@ -279,6 +309,7 @@ def _log_holding_stats(stats: dict, port_size: int) -> None:
 def run() -> None:
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     output_dir = str(cfg.OUTPUT_DIR) + os.sep
+    logger.info("Run directory: {} (config: {})", cfg.RUN_DIR, cfg.CONFIG_PATH)
 
     # ── Load data ─────────────────────────────────────────────────────────────
     pool, bm_ret = build_pool(

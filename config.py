@@ -12,6 +12,7 @@ Usage::
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 from pathlib import Path
 
 import yaml
@@ -31,6 +32,9 @@ _DEFAULTS: dict = {
             "market_data": "/ext/eq_data/daily_with_limit_prevcap.pqt",
             "preds_dir": "data/preds_size",
             "horizons": ["3d", "5d", "10d"],
+            # Optional exact source list for daily production predictions.
+            # Each item may be a filename or {file, start, end}; see doc/README.md.
+            "prediction_sources": None,
             "market_columns": {"execution_vwap": "vwap30", "bar_close": "close_ex", "prev_close": None},
             "trade_on_next_bar": True,
         },
@@ -38,12 +42,14 @@ _DEFAULTS: dict = {
             "market_data": "/ext/eq_data/15min_bar_full_left_close.parquet",
             "preds_dir": "/ext/trq",
             "horizons": ["predictions"],
+            "prediction_sources": None,
             "market_columns": {"execution_vwap": "vwap15", "bar_close": "close"},
         },
         "5min": {
             "market_data": "/ext/eq_data/5min_bar_full_left_close.parquet",
             "preds_dir": "/tmp/eq_preds/output_mse/output_bs16/predictions",
             "horizons": [""],
+            "prediction_sources": None,
             "market_columns": {"execution_vwap": "vwap5", "bar_close": "close"},
         },
     },
@@ -92,7 +98,23 @@ _FREQ_PATH_KEYS: frozenset[str] = frozenset({"market_data", "preds_dir"})
 #  Load & merge
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_CONFIG_PATH = Path(__file__).with_suffix(".yml")
+_REPO_DIR = Path(__file__).resolve().parent
+_RUN_DIR_ENV = "EQ_BACKTEST_RUN_DIR"
+
+
+def _resolve_run_dir() -> Path:
+    """Return the configured run directory, defaulting to the repository root."""
+    raw = os.environ.get(_RUN_DIR_ENV)
+    if not raw:
+        return _REPO_DIR
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    return candidate.resolve()
+
+
+RUN_DIR: Path = _resolve_run_dir()
+CONFIG_PATH: Path = RUN_DIR / "config.yml"
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -106,23 +128,29 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return merged
 
 
+def _resolve_config_path(value: str | Path) -> Path:
+    """Resolve a configured path relative to the active run directory."""
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else RUN_DIR / path
+
+
 def _convert_paths(cfg: dict) -> dict:
-    """Convert string values to ``Path`` for keys listed in ``_PATH_KEYS``."""
+    """Convert configured paths and anchor relative values at ``RUN_DIR``."""
     for key in _PATH_KEYS:
-        if key in cfg and isinstance(cfg[key], str):
-            cfg[key] = Path(cfg[key])
+        if key in cfg and isinstance(cfg[key], (str, Path)):
+            cfg[key] = _resolve_config_path(cfg[key])
     for freq_cfg in cfg.get("freq_config", {}).values():
         for pkey in _FREQ_PATH_KEYS:
-            if pkey in freq_cfg and isinstance(freq_cfg[pkey], str):
-                freq_cfg[pkey] = Path(freq_cfg[pkey])
+            if pkey in freq_cfg and isinstance(freq_cfg[pkey], (str, Path)):
+                freq_cfg[pkey] = _resolve_config_path(freq_cfg[pkey])
     return cfg
 
 
 def _load() -> dict:
     """Load config.yml (if exists) and deep-merge over defaults."""
     cfg = deepcopy(_DEFAULTS)
-    if _CONFIG_PATH.exists():
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as fh:
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
             overrides = yaml.safe_load(fh) or {}
         cfg = _deep_merge(cfg, overrides)
     return _convert_paths(cfg)
@@ -189,7 +217,7 @@ DEBUG_DATETIME: str = _cfg["debug_datetime"]
 
 # ── Eligibility and output ────────────────────────────────────────────────────
 NOSUSPEND_DAYS: int = _cfg["nosuspend_days"]
-OUTPUT_DIR: Path = Path(f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}_{FREQUENCY}")
+OUTPUT_DIR: Path = RUN_DIR / f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}_{FREQUENCY}"
 
 
 def trade_on_next_bar_for(frequency: str) -> bool:

@@ -25,14 +25,15 @@ implementation specification.
 
 ```bash
 uv sync
-uv run --with pyyaml python -m unittest discover -s tests -v
-uv run --with pyyaml python run.py   # requires configured local data
+uv run python -m unittest discover -s tests -v
+uv run python run.py runs/<name>
 ```
 
-Run commands from the repository root. Use a root-level `config.yml` for
-machine-specific paths and experiments; it is deliberately Git-ignored. Never
-commit local data, cache files, `output_*`, `research_output`, or generated
-charts.
+Run commands from the repository root. `run.py` requires an existing dedicated
+run directory containing its own `config.yml`; relative configuration paths,
+pool cache, and results resolve inside it. Use one directory per experiment and
+never commit `runs/`, `run_*/`, `backtest_runs/`, local data, cache files, or
+generated charts.
 
 There is no configured formatter, linter, or type checker. Preserve the existing
 typed, module-oriented Python style, add focused tests for behavioral changes,
@@ -82,18 +83,25 @@ I/O inside `_simulate_portfolio_core`.
 
 - `config.py` deep-merges only dictionaries. Add a default for every new public
   configuration key and update `doc/README.md` in the same change.
+- `RUN_DIR` is the directory holding the active `config.yml`. Relative market,
+  prediction, benchmark, and cache paths must remain relative to that directory;
+  `OUTPUT_DIR` must remain inside it.
 - Prediction files are only read from the direct `preds_dir` directory; do not
   recursively mix neighboring experiment outputs. Each file must have unique
   `(datetime, symbol)` keys.
+- For rolling daily production predictions, `prediction_sources` is the exact
+  user-supplied list of files and optional inclusive date intervals. It overrides
+  `horizons`; loaded intervals must remain non-overlapping. Never silently blend
+  model vintages with `prediction_merge_mode: mean`.
 - `concat_disjoint` is intentionally safe: overlapping prediction dates must
   fail unless the user explicitly selects `mean`.
 - The pool cache stores an encoded frame, including `row_idx` and `symbol_id`.
   Bump `POOL_CACHE_VERSION` whenever its serialized schema or decoding semantics
   change.
 - If a new setting changes pool contents, add it to `_pool_cache_path`'s payload.
-  In particular, check cache-key coverage whenever changing eligibility or
-  ranking; `nosuspend_days` currently affects the pool but is not included in
-  that payload, so changing it can reuse a stale cache.
+  Cache identity includes the selected prediction-file signatures, their source
+  date bounds, and `nosuspend_days`; preserve that coverage when changing
+  eligibility, ranking, or prediction selection semantics.
 - Treat external datasets as read-only. Do not add sample copies, rewrite
   source parquets, or delete a user's cache to force a result.
 
@@ -107,8 +115,8 @@ the unavailable production datasets for unit tests.
 Suggested checks:
 
 ```bash
-uv run --with pyyaml python -m unittest discover -s tests -v
-python -m compileall -q .
+uv run python -m unittest discover -s tests -v
+uv run python -m compileall -q .
 git diff --check
 git status --short
 ```
@@ -118,11 +126,6 @@ whether a timing result is cold or warm. Avoid presenting historical benchmark
 numbers as current performance.
 
 ## Known integration issue
-
-`config.py` directly imports `yaml`, but `pyproject.toml` omits a PyYAML
-dependency. A clean `uv sync` environment therefore cannot import the project.
-Use `uv run --with pyyaml ...` as a temporary workaround and add PyYAML to the
-manifest in a dedicated dependency-maintenance change.
 
 `research.py` currently calls `build_pool(..., exclude_period=...)`, but
 `build_pool` has no `exclude_period` parameter. Its CLI fails before diagnostics

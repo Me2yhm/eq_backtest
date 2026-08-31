@@ -38,20 +38,12 @@ for dependency management.
 uv sync
 ```
 
-`config.py` currently imports PyYAML, but `pyproject.toml` does not yet declare
-that direct dependency. Until the manifest is corrected, supply it explicitly
-when running project commands:
-
-```bash
-uv run --with pyyaml python run.py
-```
-
-The default paths in `config.py` point to local, non-versioned market and
-prediction data. Create a local `config.yml` in the repository root and override
-them before running. `config.yml` is ignored by Git, so it is safe for
-machine-specific paths.
+Each backtest must use a dedicated run directory. It contains that run's own
+`config.yml`, pool cache, CSV/Parquet results, and charts; use a distinct
+directory for every experiment. Run directories are ignored by Git.
 
 ```yaml
+# runs/v6-baseline/config.yml
 frequency: "daily"
 start: "2024-01-01"
 end: "2024-12-31"
@@ -64,16 +56,19 @@ freq_config:
     horizons: ["5d"]
 ```
 
-Run a backtest from the repository root:
+Create the directory, put the configuration above in `config.yml`, and launch it
+from the repository root:
 
 ```bash
-uv run --with pyyaml python run.py
+mkdir -p runs/v6-baseline
+uv run python run.py runs/v6-baseline
 ```
 
-The first run builds a preprocessed pool cache. Later runs reuse it when the
-source files and cache-key configuration are unchanged. Output is written to
-`output_{long|short}_{pool_size}_{frequency}/`; for example,
-`output_long_4400_daily/`.
+The positional run directory must already exist and contain `config.yml`. Relative
+paths in that configuration are resolved from the run directory, not the
+repository root. The first run builds `data/.cache/` there; output is written to
+`output_{long|short}_{pool_size}_{frequency}/` there, for example
+`runs/v6-baseline/output_long_4400_daily/`.
 
 To diagnose one instrument at one bar, set these local overrides and rerun:
 
@@ -99,12 +94,39 @@ values. Path-valued configuration is converted to `pathlib.Path`.
 | `start`, `end` | Inclusive backtest date range. |
 | `frequency` | One of `daily`, `15min`, or `5min`. |
 | `freq_config` | Per-frequency market path, prediction directory, prediction-file selectors, price columns, and optional execution lag. |
+| `freq_config.<frequency>.prediction_sources` | Optional exact list of selected prediction parquets, each with optional inclusive date bounds. It overrides `horizons`. |
 | `prediction_merge_mode` | `concat_disjoint` rejects overlapping prediction date ranges; `mean` averages overlaps by `(datetime, symbol)`. |
 | `use_pool_cache`, `pool_cache_dir` | Enable and locate the encoded-pool cache. |
 
-`freq_config.<frequency>.horizons` is matched against prediction file stems. An
-empty selector (`[""]`) matches every filename; use it only when the directory
-contains one intended prediction file.
+`freq_config.<frequency>.horizons` is the legacy discovery mechanism: it is
+matched against prediction file stems. An empty selector (`[""]`) matches every
+filename; use it only when the directory contains one intended prediction file.
+
+For rolling daily production predictions, set `prediction_sources` instead. It
+is a user-owned, ordered list; entries may be a direct filename or a mapping
+with a filename plus inclusive `start` and `end` bounds. Relative filenames must
+be direct children of `preds_dir`. The bounds are applied before concatenation,
+and the resulting source ranges must not overlap when
+`prediction_merge_mode: concat_disjoint` is used.
+
+```yaml
+frequency: "daily"
+start: "2020-01-02"
+end: "2026-08-28"
+freq_config:
+  daily:
+    # From runs/<name>, this reaches ../daily/prod_cache/preds from the repository root.
+    preds_dir: "../../../daily/prod_cache/preds"
+    prediction_sources:
+      - {file: "predictions_v6_2020.parquet", start: "2020-01-02", end: "2020-12-31"}
+      - {file: "predictions_v6_2021.parquet", start: "2021-01-04", end: "2021-12-31"}
+      # Continue with the exact model-vintage and date windows chosen for this run.
+```
+
+Do not select overlapping rolling-model files and switch to `mean`: that would
+average scores from different model vintages. The source path signatures and
+selected date bounds form part of the pool-cache key, so a changed selection
+rebuilds the cache automatically.
 
 ### Benchmark
 
@@ -179,7 +201,9 @@ They may be any of these forms:
 1. Long: `datetime, symbol, pred`
 2. Long legacy form: `datetime, symbol, prediction` or
    `trade_date, stock_code, prediction`
-3. A wide pandas-parquet matrix with `__index_level_0__` as its datetime index
+3. Daily production long form: `date, symbol, prediction, label`; `label` is
+   excluded and `date` is normalized to `datetime`
+4. A wide pandas-parquet matrix with `__index_level_0__` as its datetime index
 
 Each input file must contain unique `(datetime, symbol)` rows. By default,
 multiple prediction files must cover non-overlapping date ranges; choose
@@ -235,7 +259,7 @@ output directory contains:
 Run the focused regression suite:
 
 ```bash
-uv run --with pyyaml python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
 Tests use small synthetic frames and cover daily price-path derivation,

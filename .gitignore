@@ -147,6 +147,11 @@ data_*/
 
 output_*
 
+# Isolated backtest runs: per-run config, outputs, and cache
+runs/
+run_*/
+backtest_runs/
+
 *draft*
 *.rar
 tmp/
