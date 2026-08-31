@@ -47,8 +47,8 @@ directory for every experiment. Run directories are ignored by Git.
 frequency: "daily"
 start: "2024-01-01"
 end: "2024-12-31"
-use_external_benchmark: false
-bm_path: "/absolute/path/to/ret_csi_1000.csv"
+market_cache_dir: "../../cache/market_data"
+benchmark_symbol: "000852"
 freq_config:
   daily:
     market_data: "/absolute/path/to/daily_market.parquet"
@@ -97,6 +97,8 @@ values. Path-valued configuration is converted to `pathlib.Path`.
 | `freq_config.<frequency>.prediction_sources` | Optional exact list of selected prediction parquets, each with optional inclusive date bounds. It overrides `horizons`. |
 | `prediction_merge_mode` | `concat_disjoint` rejects overlapping prediction date ranges; `mean` averages overlaps by `(datetime, symbol)`. |
 | `use_pool_cache`, `pool_cache_dir` | Enable and locate the encoded-pool cache. |
+| `market_cache_dir` | Directory containing normalized, per-symbol benchmark caches. |
+| `benchmark_symbol` | Cached benchmark symbol selected for this run. |
 
 `freq_config.<frequency>.horizons` is the legacy discovery mechanism: it is
 matched against prediction file stems. An empty selector (`[""]`) matches every
@@ -130,10 +132,28 @@ rebuilds the cache automatically.
 
 ### Benchmark
 
-By default the engine reads `benchmark_return` from `external_nav_path` and
-aggregates it to daily returns. Set `use_external_benchmark: false` to read a
-CSV from `bm_path` instead. The CSV must provide a `ret` column and either a
-`date` column or a date-valued first column. `bm_name` is used in result names.
+The backtest reads benchmark returns only from `market_cache_dir`; it does not
+read a NAV parquet or a one-off benchmark CSV. Set `benchmark_symbol` to one
+cached instrument, for example `000852`. Each cache file has `date`, `close`,
+and `pct_change` columns; `pct_change` is the close-to-close daily return used
+for excess-return evaluation. A `manifest.json` may map either an
+`instrument_id` or an RQData symbol (such as `000852.XSHG`) to its cache file,
+which permits many benchmarks in the same directory.
+
+The default local cache is `cache/market_data/`.
+From a run directory under `runs/<name>`, configure it as
+`market_cache_dir: "../../cache/market_data"`. To create or update
+cache files with RQData, run an explicit refresh; RQData is not imported by a
+backtest. The refresh reads every `instrument_id`, `rq_symbol`, and
+`first_date` from `cache/market_data/manifest.json`:
+
+```bash
+uv run python market_cache.py
+```
+
+The refresh command uses the manifest's RQData mapping when present. It needs a
+locally installed and authenticated `rqdatac` package (and optionally
+`RQDATAC_USERNAME` / `RQDATAC_PASSWORD`).
 
 ### Strategy and execution
 
@@ -241,7 +261,7 @@ Maximum drawdown is calculated from `1 + cumulative_sum(daily_return)` and the
 
 ## Outputs
 
-For a run with pool size `P`, benchmark name `B`, and portfolio size `N`, the
+For a run with pool size `P`, benchmark symbol `B`, and portfolio size `N`, the
 output directory contains:
 
 | Path | Contents |

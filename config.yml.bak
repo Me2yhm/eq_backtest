@@ -25,14 +25,10 @@ freq_config:
     horizons: [""]
     market_columns: {execution_vwap: "vwap5", bar_close: "close"}
 
-bm_path: "/ext/eq_data/ret_csi_1000.csv"
-bm_name: "csi_1000"
+market_cache_dir: "cache/market_data"
+benchmark_symbol: "000852"
 pool_cache_dir: "data/.cache"
 use_pool_cache: true
-
-# ── Benchmark ─────────────────────────────────────────────────────────────────
-use_external_benchmark: true
-external_nav_path: "/ext/trq/nav.parquet"
 
 # ── Universe and strategy ─────────────────────────────────────────────────────
 universe: null

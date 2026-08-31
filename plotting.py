@@ -199,7 +199,7 @@ def plot_portfolio_results(
 def plot_metrics_table(
     metrics_df: pd.DataFrame,
     pool_size: int,
-    bm_name: str,
+    benchmark_symbol: str,
     is_short: bool = False,
     output_path: str = "output/",
 ) -> None:
@@ -229,7 +229,7 @@ def plot_metrics_table(
 
     direction = "Short" if is_short else "Long"
     ax.set_title(
-        f"Portfolio Metrics ({direction} | Pool: {pool_size} | BM: {bm_name})",
+        f"Portfolio Metrics ({direction} | Pool: {pool_size} | BM: {benchmark_symbol})",
         fontsize=12,
         weight="bold",
         pad=20,
@@ -237,7 +237,7 @@ def plot_metrics_table(
 
     pdir = _ensure_plot_dir(output_path, is_short)
     fig.savefig(
-        os.path.join(pdir, f"metrics_{pool_size}_{bm_name}.png"),
+        os.path.join(pdir, f"metrics_{pool_size}_{benchmark_symbol}.png"),
         dpi=300,
         bbox_inches="tight",
     )

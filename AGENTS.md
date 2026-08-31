@@ -6,8 +6,9 @@ Backtest repository. Prefer current code over historical performance notes.
 ## Scope and source of truth
 
 This repository backtests forecast-ranked A-share portfolios on daily, 15-minute,
-and 5-minute bars. It is not a standalone data package: the default market,
-prediction, and benchmark paths are local external paths.
+and 5-minute bars. It is not a standalone data package: market and prediction
+paths are local external paths, while benchmark returns come from a local market
+cache selected by symbol.
 
 Read sources in this order:
 
@@ -44,7 +45,8 @@ and always inspect `git diff` plus `git diff --check` before handoff.
 | File | Responsibility |
 | --- | --- |
 | `config.py` | Defaults, deep merge of `config.yml`, path conversion, and derived runtime constants. |
-| `data_loader.py` | Schema validation, market/prediction normalization, daily-rule broadcast, cache, and `BacktestDataset` encoding. |
+| `data_loader.py` | Schema validation, market/prediction normalization, daily-rule broadcast, pool cache, and `BacktestDataset` encoding. |
+| `market_cache.py` | Local per-symbol benchmark cache loading and explicit RQData refresh command. |
 | `portfolio.py` | Numba portfolio state machine plus materialization of positions and target weights. |
 | `run.py` | Entry point, daily aggregation, benchmark/excess evaluation, file writing, and plots. |
 | `metrics.py` | Portfolio and holding-period metrics. |
@@ -84,8 +86,11 @@ I/O inside `_simulate_portfolio_core`.
 - `config.py` deep-merges only dictionaries. Add a default for every new public
   configuration key and update `doc/README.md` in the same change.
 - `RUN_DIR` is the directory holding the active `config.yml`. Relative market,
-  prediction, benchmark, and cache paths must remain relative to that directory;
+  prediction, and cache paths must remain relative to that directory;
   `OUTPUT_DIR` must remain inside it.
+- Backtests must read benchmark returns only through `market_cache.py` using
+  `market_cache_dir` and `benchmark_symbol`. Keep RQData imports inside the
+  explicit refresh path; never make normal backtest execution fetch data.
 - Prediction files are only read from the direct `preds_dir` directory; do not
   recursively mix neighboring experiment outputs. Each file must have unique
   `(datetime, symbol)` keys.

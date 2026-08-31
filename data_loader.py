@@ -79,22 +79,6 @@ class PredictionSource:
     end: str | None = None
 
 
-def load_benchmark(path: Path) -> pd.Series:
-    frame = pl.read_csv(path)
-    if "date" not in frame.columns:
-        frame = frame.with_columns(pl.col(frame.columns[0]).cast(pl.Date).alias("date"))
-    elif frame["date"].dtype == pl.String:
-        frame = frame.with_columns(pl.col("date").str.strptime(pl.Date, "%m/%d/%Y", strict=False))
-    return pd.Series(frame.sort("date").to_pandas().set_index("date")["ret"], name="ret")
-
-
-def load_external_benchmark(nav_path: Path) -> pd.Series:
-    nav = pd.read_parquet(nav_path)
-    result = nav["benchmark_return"].groupby(nav.index.normalize()).sum()
-    result.index.name, result.name = "date", "ret"
-    return result
-
-
 def _frequency_name(freq_cfg: dict) -> str:
     """Resolve the configured frequency without duplicating it in every config item."""
     market_path = Path(freq_cfg["market_data"])
@@ -785,7 +769,6 @@ def _read_cached_pool(path: Path) -> BacktestDataset | None:
 
 def build_pool(
     freq_cfg: dict,
-    bm_path: Path,
     start: str,
     end: str | None,
     universe: list[str] | None,
@@ -794,7 +777,7 @@ def build_pool(
     cache_dir: Path | None = None,
     nosuspend_days: int = 10,
     prediction_merge_mode: str = "concat_disjoint",
-) -> tuple[BacktestDataset, pd.Series]:
+) -> BacktestDataset:
     """Build a canonical pool for daily, intraday, or 5-minute backtests."""
     import config as cfg
 
@@ -814,12 +797,11 @@ def build_pool(
         nosuspend_days,
         prediction_merge_mode,
     )
-    bm_ret = load_external_benchmark(cfg.EXTERNAL_NAV_PATH) if cfg.USE_EXTERNAL_BENCHMARK else load_benchmark(bm_path)
     if use_cache:
         cached = _read_cached_pool(cache_path)
         if cached is not None:
             logger.info("Pool cache: hit – {}", cache_path.name)
-            return cached, bm_ret
+            return cached
         logger.info("Pool cache: miss – {}", cache_path.name)
 
     predictions = load_predictions(
@@ -867,4 +849,4 @@ def build_pool(
         resolved_cache_dir.mkdir(parents=True, exist_ok=True)
         dataset.pool_frame.write_parquet(cache_path)
         logger.info("Pool cache: wrote – {}", cache_path.name)
-    return dataset, bm_ret
+    return dataset

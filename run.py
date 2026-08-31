@@ -47,6 +47,7 @@ if __name__ == "__main__":
 
 import config as cfg
 from data_loader import build_pool
+from market_cache import load_benchmark_returns
 from metrics import holding_period_stats, portfolio_metrics
 from plotting import (
     plot_holding_periods,
@@ -312,9 +313,14 @@ def run() -> None:
     logger.info("Run directory: {} (config: {})", cfg.RUN_DIR, cfg.CONFIG_PATH)
 
     # ── Load data ─────────────────────────────────────────────────────────────
-    pool, bm_ret = build_pool(
+    bm_ret = load_benchmark_returns(
+        cfg.MARKET_CACHE_DIR,
+        cfg.BENCHMARK_SYMBOL,
+        start=cfg.START,
+        end=cfg.END,
+    )
+    pool = build_pool(
         freq_cfg=cfg.FREQ_CONFIG[cfg.FREQUENCY],
-        bm_path=cfg.BM_PATH,
         start=cfg.START,
         end=cfg.END,
         universe=cfg.UNIVERSE,
@@ -404,7 +410,7 @@ def run() -> None:
     port_sizes_df = pd.DataFrame(all_port_sizes)
     close_df = pd.concat(list(all_closes.values()), axis=1) if all_closes else pd.DataFrame()
 
-    tag = f"{cfg.POOL_SIZE}_{cfg.BM_NAME}"
+    tag = f"{cfg.POOL_SIZE}_{cfg.BENCHMARK_SYMBOL}"
     metrics_df.to_csv(f"{output_dir}metrics_{tag}.csv")
     cumrets_df.to_csv(f"{output_dir}cumrets_{tag}.csv")
     ret_df.to_csv(f"{output_dir}returns_{tag}.csv")
@@ -421,7 +427,7 @@ def run() -> None:
     plot_metrics_table(
         metrics_df,
         cfg.POOL_SIZE,
-        cfg.BM_NAME,
+        cfg.BENCHMARK_SYMBOL,
         is_short=cfg.IS_SHORT,
         output_path=output_dir,
     )

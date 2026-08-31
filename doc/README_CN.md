@@ -146,10 +146,8 @@ freq_config:
 
 | 键 | 默认值 | 说明 |
 |---|---|---|
-| `bm_path` | `/ext/eq_data/ret_csi_1000.csv` | 本地基准日收益（`date,ret`） |
-| `bm_name` | `"csi_1000"` | 基准名，用于输出文件命名 |
-| `use_external_benchmark` | `true` | 为 `true` 时改用外部 `nav.parquet` 的 `benchmark_return` |
-| `external_nav_path` | `/ext/trq/nav.parquet` | 外部 NAV 文件路径 |
+| `market_cache_dir` | `data/market_cache` | 本地市场缓存目录，每个基准一个规范化 CSV |
+| `benchmark_symbol` | `"000852"` | 本次回测使用的缓存基准标识；用于输出文件命名 |
 
 ### 3.5 股票池与策略参数
 

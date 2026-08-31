@@ -53,14 +53,11 @@ _DEFAULTS: dict = {
             "market_columns": {"execution_vwap": "vwap5", "bar_close": "close"},
         },
     },
-    "bm_path": "/ext/eq_data/ret_csi_1000.csv",
-    "bm_name": "csi_1000",
+    "market_cache_dir": "cache/market_data",
+    "benchmark_symbol": "000852",
     "pool_cache_dir": "data/.cache",
     "use_pool_cache": True,
     "prediction_merge_mode": "concat_disjoint",
-    # ── Benchmark ─────────────────────────────────────────────────────────────
-    "use_external_benchmark": True,
-    "external_nav_path": "/ext/trq/nav.parquet",
     # ── Universe and strategy ─────────────────────────────────────────────────
     "universe": None,
     "is_short": False,
@@ -88,7 +85,7 @@ _DEFAULTS: dict = {
 }
 
 # Top-level keys whose string value should be converted to ``Path``.
-_PATH_KEYS: frozenset[str] = frozenset({"bm_path", "pool_cache_dir", "external_nav_path"})
+_PATH_KEYS: frozenset[str] = frozenset({"pool_cache_dir", "market_cache_dir"})
 
 # Keys *inside* each ``freq_config`` sub-table that are paths.
 _FREQ_PATH_KEYS: frozenset[str] = frozenset({"market_data", "preds_dir"})
@@ -178,15 +175,11 @@ DATA_PATH: Path = FREQ_CONFIG[FREQUENCY]["market_data"]
 PREDS_DIR: Path = FREQ_CONFIG[FREQUENCY]["preds_dir"]
 HORIZONS: list[str] = FREQ_CONFIG[FREQUENCY]["horizons"]
 
-BM_PATH: Path = _cfg["bm_path"]
-BM_NAME: str = _cfg["bm_name"]
+MARKET_CACHE_DIR: Path = _cfg["market_cache_dir"]
+BENCHMARK_SYMBOL: str = _cfg["benchmark_symbol"]
 POOL_CACHE_DIR: Path = _cfg["pool_cache_dir"]
 USE_POOL_CACHE: bool = _cfg["use_pool_cache"]
 PREDICTION_MERGE_MODE: str = _cfg["prediction_merge_mode"]
-
-# ── Benchmark ─────────────────────────────────────────────────────────────────
-USE_EXTERNAL_BENCHMARK: bool = _cfg["use_external_benchmark"]
-EXTERNAL_NAV_PATH: Path = _cfg["external_nav_path"]
 
 # ── Universe and strategy ─────────────────────────────────────────────────────
 UNIVERSE: list[str] | None = _cfg["universe"]

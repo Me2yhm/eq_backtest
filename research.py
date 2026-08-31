@@ -12,6 +12,7 @@ from loguru import logger
 
 import config as cfg
 from data_loader import BacktestDataset, _encode_dataset, build_pool
+from market_cache import load_benchmark_returns
 from run import run_single_portfolio
 
 
@@ -280,9 +281,8 @@ def main() -> None:
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    pool, bm_ret = build_pool(
+    pool = build_pool(
         freq_cfg=cfg.FREQ_CONFIG[cfg.FREQUENCY],
-        bm_path=cfg.BM_PATH,
         start=cfg.START,
         end=cfg.END,
         universe=cfg.UNIVERSE,
@@ -292,6 +292,12 @@ def main() -> None:
         nosuspend_days=cfg.NOSUSPEND_DAYS,
         exclude_period=cfg.EXCLUDE_PERIOD,
         prediction_merge_mode=cfg.PREDICTION_MERGE_MODE,
+    )
+    bm_ret = load_benchmark_returns(
+        cfg.MARKET_CACHE_DIR,
+        cfg.BENCHMARK_SYMBOL,
+        start=cfg.START,
+        end=cfg.END,
     )
     per_bar, summary = signal_validation(pool, pool_size=cfg.POOL_SIZE, top_n=cfg.PORT_SIZES[0])
     per_bar.write_csv(args.output_dir / "signal_validation_per_bar.csv")

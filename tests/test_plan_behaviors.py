@@ -19,6 +19,7 @@ from data_loader import (
     _validate_prediction_frames,
     load_predictions,
 )
+from market_cache import _parse_args, _refresh_instruments, load_benchmark_returns
 from research import signal_validation
 
 
@@ -29,8 +30,8 @@ class PlanBehaviorTests(unittest.TestCase):
             (run_dir / "config.yml").write_text(
                 """
 frequency: daily
-bm_path: benchmark.csv
-external_nav_path: nav.parquet
+market_cache_dir: market_cache
+benchmark_symbol: 000852
 pool_cache_dir: cache
 freq_config:
   daily:
@@ -53,12 +54,54 @@ freq_config:
 
             self.assertEqual(module.RUN_DIR, run_dir)
             self.assertEqual(module.CONFIG_PATH, run_dir / "config.yml")
-            self.assertEqual(module.BM_PATH, run_dir / "benchmark.csv")
-            self.assertEqual(module.EXTERNAL_NAV_PATH, run_dir / "nav.parquet")
+            self.assertEqual(module.MARKET_CACHE_DIR, run_dir / "market_cache")
+            self.assertEqual(module.BENCHMARK_SYMBOL, "000852")
+            self.assertFalse(hasattr(module, "BM_PATH"))
+            self.assertFalse(hasattr(module, "EXTERNAL_NAV_PATH"))
             self.assertEqual(module.POOL_CACHE_DIR, run_dir / "cache")
             self.assertEqual(module.FREQ_CONFIG["daily"]["market_data"], run_dir / "market.parquet")
             self.assertEqual(module.FREQ_CONFIG["daily"]["preds_dir"], run_dir / "predictions")
             self.assertEqual(module.OUTPUT_DIR, run_dir / "output_long_4400_daily")
+
+    def test_market_cache_loads_manifest_mapped_benchmarks(self) -> None:
+        with TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp)
+            (cache_dir / "manifest.json").write_text(
+                """
+{"instruments": [
+  {"instrument_id": "000852", "rq_symbol": "000852.XSHG", "cache_file": "000852.csv", "first_date": "2010-01-01"},
+  {"instrument_id": "512890", "rq_symbol": "512890.XSHG", "cache_file": "512890.csv", "first_date": "2019-01-18"}
+]}
+""".lstrip(),
+                encoding="utf-8",
+            )
+            (cache_dir / "000852.csv").write_text(
+                "date,close,pct_change\n2024-01-02,100,0\n2024-01-03,101,0.01\n2024-01-04,99,-0.019801980198\n",
+                encoding="utf-8",
+            )
+            (cache_dir / "512890.csv").write_text(
+                "date,close,pct_change\n2024-01-02,10,0\n2024-01-03,11,0.1\n",
+                encoding="utf-8",
+            )
+
+            returns = load_benchmark_returns(
+                cache_dir, "000852.XSHG", start="2024-01-03", end="2024-01-04"
+            )
+            alternate = load_benchmark_returns(cache_dir, "512890")
+
+            self.assertEqual(
+                returns.index.tolist(), [pd.Timestamp("2024-01-03"), pd.Timestamp("2024-01-04")]
+            )
+            self.assertEqual(returns.tolist(), [0.01, -0.019801980198])
+            self.assertEqual(alternate.tolist(), [0.0, 0.1])
+            refresh_sources = _refresh_instruments(cache_dir)
+            self.assertEqual([source.symbol for source, _ in refresh_sources], ["000852", "512890"])
+            self.assertEqual([seed.isoformat() for _, seed in refresh_sources], ["2010-01-01", "2019-01-18"])
+
+    def test_market_cache_refresh_is_the_default_command(self) -> None:
+        args = _parse_args([])
+        self.assertEqual(args.command, "refresh")
+        self.assertEqual(args.cache_dir, Path("cache/market_data"))
 
     def test_daily_vwap30_price_path_derives_previous_close(self) -> None:
         frame = pl.DataFrame(
