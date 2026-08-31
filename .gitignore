@@ -152,14 +152,6 @@ output_*
 # Isolated backtest runs: per-run config, outputs, and cache
 runs/
 run_*/
-backtest_runs/
-
-# Local market data; the tracked manifest is the cache-refresh plan.
-!cache/
-cache/*
-!cache/market_data/
-cache/market_data/*
-!cache/market_data/manifest.json
 
 *draft*
 *.rar

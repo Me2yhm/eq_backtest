@@ -7,7 +7,7 @@ runtime dependency.
 
 Example
 -------
-    # cache/market_data/manifest.json declares symbols and their first_date values.
+    # cache/manifest.json declares symbols and their first_date values.
     uv run python market_cache.py
 """
 
@@ -54,7 +54,7 @@ def _validate_symbol(symbol: str) -> str:
 
 
 def _read_manifest(cache_dir: Path) -> Mapping[str, object] | None:
-    path = cache_dir / "manifest.json"
+    path = cache_dir.parent / "manifest.json"
     if not path.exists():
         return None
     try:
@@ -254,7 +254,7 @@ def _refresh_instruments(cache_dir: Path) -> list[tuple[CachedInstrument, date]]
     """Return manifest-declared cache instruments and their seed dates."""
     manifest = _read_manifest(cache_dir)
     if manifest is None:
-        raise MarketDataCacheError(f"Market-cache manifest is missing: {cache_dir / 'manifest.json'}")
+        raise MarketDataCacheError(f"Market-cache manifest is missing: {cache_dir.parent / 'manifest.json'}")
     entries = manifest.get("instruments")
     if not isinstance(entries, list) or not entries:
         raise MarketDataCacheError("Market-cache manifest must declare at least one instrument.")
@@ -280,7 +280,7 @@ def refresh_market_cache(
     *,
     end: str | None = None,
 ) -> dict[str, str]:
-    """Refresh every instrument declared by ``cache_dir/manifest.json``."""
+    """Refresh every instrument declared by the parent cache-root manifest."""
     cache_dir = Path(cache_dir)
     end_date = _parse_bound(end, name="end") or date.today()
     rq = _rqdatac_client()

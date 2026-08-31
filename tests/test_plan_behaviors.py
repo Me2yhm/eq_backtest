@@ -65,8 +65,9 @@ freq_config:
 
     def test_market_cache_loads_manifest_mapped_benchmarks(self) -> None:
         with TemporaryDirectory() as tmp:
-            cache_dir = Path(tmp)
-            (cache_dir / "manifest.json").write_text(
+            cache_dir = Path(tmp) / "market_data"
+            cache_dir.mkdir()
+            (cache_dir.parent / "manifest.json").write_text(
                 """
 {"instruments": [
   {"instrument_id": "000852", "rq_symbol": "000852.XSHG", "cache_file": "000852.csv", "first_date": "2010-01-01"},

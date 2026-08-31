@@ -145,7 +145,7 @@ From a run directory under `runs/<name>`, configure it as
 `market_cache_dir: "../../cache/market_data"`. To create or update
 cache files with RQData, run an explicit refresh; RQData is not imported by a
 backtest. The refresh reads every `instrument_id`, `rq_symbol`, and
-`first_date` from `cache/market_data/manifest.json`:
+`first_date` from `cache/manifest.json`:
 
 ```bash
 uv run python market_cache.py
