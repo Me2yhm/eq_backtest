@@ -1,9 +1,9 @@
 [project]
-name = "bt-daily"
+name = "eq-backtest"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.11"
+description = "Equity Cross-sectional Strategy Backtest"
+readme = "doc/README.md"
+requires-python = ">=3.10"
 dependencies = [
     "pandas",
     "numpy",

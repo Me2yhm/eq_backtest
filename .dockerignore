@@ -1,0 +1,12 @@
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Run data, outputs, and local market data are bind-mounted at runtime.
+runs/
+data/
+output_*
+cache/*
+!cache/manifest.json
+examples_cache/

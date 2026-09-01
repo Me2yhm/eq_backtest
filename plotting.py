@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt  # type: ignore[import]
 import numpy as np
 import pandas as pd
 
+HEATMAP_MAX_SIZE_RANK = 6_000
+
 # ── Shared helper ──────────────────────────────────────────────────────────────
 
 
@@ -91,17 +93,22 @@ def plot_position_heatmap(
     is_short: bool = False,
     output_path: str = "output/",
 ) -> None:
-    """Heatmap of position count across size-rank bins per day."""
+    """Heatmap of position count across size-rank bins from 0 through 6,000."""
     if positions.empty:
         return
 
     df = positions.reset_index()
-    max_rank = df["size_rank"].max()
-    bins = np.linspace(0, max_rank, size_rank_bins + 1)
+    dates_list = list(df["date"].drop_duplicates())
+    bins = np.linspace(0, HEATMAP_MAX_SIZE_RANK, size_rank_bins + 1)
+    df = df.loc[df["size_rank"].between(0, HEATMAP_MAX_SIZE_RANK)].copy()
     df["bin"] = pd.cut(df["size_rank"], bins=bins, labels=False, include_lowest=True)
 
-    heatmap = df.groupby(["date", "bin"]).size().unstack(fill_value=0)
-    dates_list = list(heatmap.index)
+    heatmap = (
+        df.groupby(["date", "bin"]).size().unstack(fill_value=0)
+        if not df.empty
+        else pd.DataFrame(index=dates_list)
+    )
+    heatmap = heatmap.reindex(index=dates_list, columns=range(size_rank_bins), fill_value=0)
 
     fig, ax = plt.subplots(figsize=(14, 8))
     im = ax.imshow(heatmap.T, aspect="auto", cmap="viridis", interpolation="nearest")

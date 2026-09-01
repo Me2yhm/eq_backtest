@@ -7,7 +7,7 @@ import unittest
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import polars as pl
@@ -20,10 +20,36 @@ from data_loader import (
     load_predictions,
 )
 from market_cache import _parse_args, _refresh_instruments, load_benchmark_returns
+from plotting import plot_position_heatmap
 from research import signal_validation
 
 
 class PlanBehaviorTests(unittest.TestCase):
+    def test_position_heatmap_uses_fixed_6000_size_rank_range(self) -> None:
+        positions = pd.DataFrame(
+            {"size_rank": [100, 999_999]},
+            index=pd.MultiIndex.from_tuples(
+                [(pd.Timestamp("2024-01-02"), "A"), (pd.Timestamp("2024-01-03"), "B")],
+                names=["date", "symbol"],
+            ),
+        )
+        figure = MagicMock()
+        axis = MagicMock()
+
+        with (
+            TemporaryDirectory() as tmp,
+            patch("plotting.plt.subplots", return_value=(figure, axis)),
+            patch("plotting.plt.colorbar"),
+            patch("plotting.plt.tight_layout"),
+            patch("plotting.plt.close"),
+        ):
+            plot_position_heatmap(positions, output_path=tmp)
+
+        heatmap = axis.imshow.call_args.args[0]
+        self.assertEqual(heatmap.shape, (20, 2))
+        self.assertEqual(heatmap.iloc[:, 1].sum(), 0)
+        self.assertEqual(axis.set_yticklabels.call_args.args[0][-1], "5700–6000")
+
     def test_run_directory_config_owns_relative_paths_and_output(self) -> None:
         with TemporaryDirectory() as tmp:
             run_dir = Path(tmp).resolve()

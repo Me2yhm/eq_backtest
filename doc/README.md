@@ -70,6 +70,20 @@ repository root. The first run builds `data/.cache/` there; output is written to
 `output_{long|short}_{pool_size}_{frequency}/` there, for example
 `runs/v6-baseline/output_long_4400_daily/`.
 
+## Docker
+
+For an Ubuntu host, build the image once and run a dedicated run directory:
+
+```bash
+./docker/build.sh
+./docker/run.sh runs/v6-baseline
+```
+
+The runner mounts the repository source at `/app` read-only, while mounting
+`runs/` and `cache/` read-write. Therefore Python and configuration changes are
+used by the next `./docker/run.sh` invocation without an image rebuild. Rebuild
+only after changing `Dockerfile`, `pyproject.toml`, or `uv.lock`.
+
 To diagnose one instrument at one bar, set these local overrides and rerun:
 
 ```yaml
