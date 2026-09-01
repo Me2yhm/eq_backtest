@@ -57,11 +57,16 @@ _DEFAULTS: dict = {
     "benchmark_symbol": "000852",
     "pool_cache_dir": "data/.cache",
     "use_pool_cache": True,
+    "benchmark_missing_return_policy": "error",
     "prediction_merge_mode": "concat_disjoint",
     # ── Universe and strategy ─────────────────────────────────────────────────
     "universe": None,
     "is_short": False,
     "allow_st_open": False,
+    # A null value preserves legacy is_short behavior for existing run configs.
+    "strategy_modes": None,
+    "short_borrow_sources": [],
+    "borrow_selection": "min_available_rate",
     "pool_size": 4400,
     "port_sizes": [800],
     "thresh_out_buffer": 600,
@@ -140,6 +145,11 @@ def _convert_paths(cfg: dict) -> dict:
         for pkey in _FREQ_PATH_KEYS:
             if pkey in freq_cfg and isinstance(freq_cfg[pkey], (str, Path)):
                 freq_cfg[pkey] = _resolve_config_path(freq_cfg[pkey])
+    raw_borrow_sources = cfg.get("short_borrow_sources", [])
+    if isinstance(raw_borrow_sources, list):
+        for source in raw_borrow_sources:
+            if isinstance(source, dict) and isinstance(source.get("path"), (str, Path)):
+                source["path"] = _resolve_config_path(source["path"])
     return cfg
 
 
@@ -154,6 +164,27 @@ def _load() -> dict:
 
 
 _cfg = _load()
+
+def _strategy_modes(raw: object, is_short: bool) -> tuple[str, ...]:
+    if raw is None:
+        return ("short_only",) if is_short else ("long_only",)
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("strategy_modes must be a non-empty list or null")
+    modes = tuple(str(mode) for mode in raw)
+    allowed = {"long_only", "short_only", "long_short"}
+    unexpected = set(modes).difference(allowed)
+    if unexpected:
+        raise ValueError(f"Unsupported strategy_modes: {sorted(unexpected)}")
+    if len(set(modes)) != len(modes):
+        raise ValueError("strategy_modes must not contain duplicates")
+    return modes
+
+def _benchmark_missing_return_policy(raw: object) -> str:
+    if raw not in {"error", "zero"}:
+        raise ValueError("benchmark_missing_return_policy must be 'error' or 'zero'")
+    return str(raw)
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -179,12 +210,16 @@ MARKET_CACHE_DIR: Path = _cfg["market_cache_dir"]
 BENCHMARK_SYMBOL: str = _cfg["benchmark_symbol"]
 POOL_CACHE_DIR: Path = _cfg["pool_cache_dir"]
 USE_POOL_CACHE: bool = _cfg["use_pool_cache"]
+BENCHMARK_MISSING_RETURN_POLICY: str = _benchmark_missing_return_policy(_cfg["benchmark_missing_return_policy"])
 PREDICTION_MERGE_MODE: str = _cfg["prediction_merge_mode"]
 
 # ── Universe and strategy ─────────────────────────────────────────────────────
 UNIVERSE: list[str] | None = _cfg["universe"]
 IS_SHORT: bool = _cfg["is_short"]
 ALLOW_ST_OPEN: bool = _cfg["allow_st_open"]
+STRATEGY_MODES: tuple[str, ...] = _strategy_modes(_cfg["strategy_modes"], IS_SHORT)
+SHORT_BORROW_SOURCES: list[dict] = _cfg["short_borrow_sources"]
+BORROW_SELECTION: str = _cfg["borrow_selection"]
 POOL_SIZE: int = _cfg["pool_size"]
 PORT_SIZES: list[int] = _cfg["port_sizes"]
 THRESH_OUT_BUFFER: int = _cfg["thresh_out_buffer"]
@@ -210,7 +245,17 @@ DEBUG_DATETIME: str = _cfg["debug_datetime"]
 
 # ── Eligibility and output ────────────────────────────────────────────────────
 NOSUSPEND_DAYS: int = _cfg["nosuspend_days"]
-OUTPUT_DIR: Path = RUN_DIR / f"output_{'short' if IS_SHORT else 'long'}_{POOL_SIZE}_{FREQUENCY}"
+
+
+def output_dir_for_mode(mode: str) -> Path:
+    labels = {"long_only": "long", "short_only": "short", "long_short": "long_short"}
+    try:
+        return RUN_DIR / f"output_{labels[mode]}_{POOL_SIZE}_{FREQUENCY}"
+    except KeyError as exc:
+        raise ValueError(f"Unsupported strategy mode: {mode!r}") from exc
+
+
+OUTPUT_DIR: Path = output_dir_for_mode(STRATEGY_MODES[0])
 
 
 def trade_on_next_bar_for(frequency: str) -> bool:

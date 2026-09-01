@@ -13,8 +13,10 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from loguru import logger
+from sbl_loader import load_borrow_availability, sbl_source_signature
 
-POOL_CACHE_VERSION = 10
+
+POOL_CACHE_VERSION = 11
 _BASE_COLUMNS = {
     "datetime",
     "date",
@@ -36,6 +38,10 @@ _BASE_COLUMNS = {
     "can_open_base",
     "can_trade_buy",
     "can_trade_sell",
+    "borrow_available",
+    "borrow_rate",
+    "borrow_provider",
+    "borrow_channel",
     "vwap_ret",
     "execution_vwap",
     "prev_close",
@@ -67,6 +73,8 @@ class BacktestDataset:
     can_open_base: np.ndarray
     can_trade_buy: np.ndarray
     can_trade_sell: np.ndarray
+    borrow_available: np.ndarray
+    borrow_rate: np.ndarray
     sort_cache: dict[bool, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
 
 
@@ -687,6 +695,8 @@ def _dataset_from_encoded_frame(encoded: pl.DataFrame) -> BacktestDataset:
         can_open=encoded["can_open"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
         can_open_base=encoded["can_open_base"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
         can_trade_buy=encoded["can_trade_buy"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        borrow_available=encoded["borrow_available"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
+        borrow_rate=encoded["borrow_rate"].fill_null(0.0).to_numpy().astype(np.float64, copy=False),
         can_trade_sell=encoded["can_trade_sell"].fill_null(False).to_numpy().astype(np.bool_, copy=False),
     )
 
@@ -735,6 +745,8 @@ def _pool_cache_path(
     allow_st_open: bool,
     nosuspend_days: int,
     prediction_merge_mode: str,
+    short_borrow_sources: list[dict[str, Any]] | None = None,
+    borrow_selection: str = "min_available_rate",
 ) -> Path:
     payload = {
         "version": POOL_CACHE_VERSION,
@@ -751,6 +763,8 @@ def _pool_cache_path(
         "allow_st_open": allow_st_open,
         "nosuspend_days": nosuspend_days,
         "prediction_merge_mode": prediction_merge_mode,
+        "sbl_sources": sbl_source_signature(short_borrow_sources, borrow_selection) if short_borrow_sources else [],
+        "borrow_selection": borrow_selection if short_borrow_sources else None,
         "market_columns": freq_cfg.get("market_columns", {}),
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
@@ -776,6 +790,8 @@ def build_pool(
     use_cache: bool = True,
     cache_dir: Path | None = None,
     nosuspend_days: int = 10,
+    short_borrow_sources: list[dict[str, Any]] | None = None,
+    borrow_selection: str = "min_available_rate",
     prediction_merge_mode: str = "concat_disjoint",
 ) -> BacktestDataset:
     """Build a canonical pool for daily, intraday, or 5-minute backtests."""
@@ -796,6 +812,8 @@ def build_pool(
         allow_st_open,
         nosuspend_days,
         prediction_merge_mode,
+        short_borrow_sources,
+        borrow_selection,
     )
     if use_cache:
         cached = _read_cached_pool(cache_path)
@@ -841,6 +859,27 @@ def build_pool(
                 ),
             )
         )
+    if short_borrow_sources:
+        borrow = load_borrow_availability(
+            short_borrow_sources,
+            start=start,
+            end=end,
+            cache_dir=resolved_cache_dir,
+            selection=borrow_selection,
+            use_cache=use_cache,
+        )
+        market = market.join(borrow, on=["date", "symbol"], how="left")
+    else:
+        market = market.with_columns([
+            pl.lit(False).alias("borrow_available"),
+            pl.lit(0.0).alias("borrow_rate"),
+            pl.lit(None, dtype=pl.String).alias("borrow_provider"),
+            pl.lit(None, dtype=pl.String).alias("borrow_channel"),
+        ])
+    market = market.with_columns([
+        pl.col("borrow_available").fill_null(False),
+        pl.col("borrow_rate").fill_null(0.0),
+    ])
     dataset = _encode_dataset(
         market.join(predictions, on=["datetime", "symbol"], how="left").sort(["datetime", "symbol"]),
         derive_prev_close=frequency != "daily",

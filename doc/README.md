@@ -67,7 +67,7 @@ uv run python run.py runs/v6-baseline
 The positional run directory must already exist and contain `config.yml`. Relative
 paths in that configuration are resolved from the run directory, not the
 repository root. The first run builds `data/.cache/` there; output is written to
-`output_{long|short}_{pool_size}_{frequency}/` there, for example
+`output_{long|short|long_short}_{pool_size}_{frequency}/` there, for example
 `runs/v6-baseline/output_long_4400_daily/`.
 
 ## Docker
@@ -110,9 +110,10 @@ values. Path-valued configuration is converted to `pathlib.Path`.
 | `freq_config` | Per-frequency market path, prediction directory, prediction-file selectors, price columns, and optional execution lag. |
 | `freq_config.<frequency>.prediction_sources` | Optional exact list of selected prediction parquets, each with optional inclusive date bounds. It overrides `horizons`. |
 | `prediction_merge_mode` | `concat_disjoint` rejects overlapping prediction date ranges; `mean` averages overlaps by `(datetime, symbol)`. |
-| `use_pool_cache`, `pool_cache_dir` | Enable and locate the encoded-pool cache. |
+| `use_pool_cache`, `pool_cache_dir` | Enable and locate the encoded-pool cache and normalized SBL cache. When false, both caches are bypassed and SBL workbooks are streamed without a cache write. |
 | `market_cache_dir` | Directory containing normalized, per-symbol benchmark caches. |
 | `benchmark_symbol` | Cached benchmark symbol selected for this run. |
+| `benchmark_missing_return_policy` | `error` (default) rejects a missing benchmark return for any backtest date; `zero` is an explicit opt-in for dates intentionally treated as zero. |
 
 `freq_config.<frequency>.horizons` is the legacy discovery mechanism: it is
 matched against prediction file stems. An empty selector (`[""]`) matches every
@@ -178,7 +179,10 @@ locally installed and authenticated `rqdatac` package (and optionally
 | `pool_size` | Maximum eligible size rank for the candidate pool. |
 | `port_sizes` | List of actual portfolio sizes to simulate. |
 | `thresh_out_buffer` | A held target may remain until rank exceeds `port_size + thresh_out_buffer`. |
-| `is_short` | Select low predictions and compute excess as benchmark minus strategy return. |
+| `strategy_modes` | Explicit ordered list of `long_only`, `short_only`, and/or `long_short`. |
+| `short_borrow_sources` | Explicit SBL source mappings with `provider`, `adapter`, and run-directory-relative `path`; required by short modes. |
+| `borrow_selection` | Available-borrow selection policy; currently `min_available_rate`. |
+| `is_short` | Legacy single-mode compatibility switch when `strategy_modes` is omitted. |
 | `trade_on_next_bar` | Use the preceding bar's signal for execution. The daily configuration enables this by default. |
 | `strict_first_bar_top_n` | Restrict initial execution to strict top-N candidates. |
 | `close_on_size_drop` | Force a close when a holding leaves the size pool. |
@@ -189,6 +193,51 @@ locally installed and authenticated `rqdatac` package (and optionally
 | `agg_mode` | Intraday-to-daily return aggregation: `simple` or `compound`. |
 | `compounding` | Use geometric rather than arithmetic annualization for metrics. |
 | `exclude_period` | Optional `[start, end]` interval excluded from final evaluation metrics only. |
+
+### Securities borrowing (SBL)
+
+`strategy_modes` explicitly selects any of `long_only`, `short_only`, and
+`long_short`. When it is omitted, legacy `is_short` still selects one mode.
+`short_only` is a long-benchmark / short-stock spread; `long_short` has one
+unit of each sleeve (2.0 gross). Each selected mode writes its own
+`output_{long|short|long_short}_{pool_size}_{frequency}/` directory.
+
+A short mode requires an explicit source list. The source path is resolved from
+the dedicated run directory and must be an `.xlsx` Yading workbook for now:
+
+```yaml
+strategy_modes: [long_only, short_only, long_short]
+short_borrow_sources:
+  - provider: yading
+    adapter: yading
+    path: ../../cache/SBL/Yading/20250424-20260709券单.xlsx
+borrow_selection: min_available_rate
+```
+
+The Yading adaptor streams every worksheet and validates its six fields and
+composite `市场` values (`SH.QFII`, `SH.HK`, `SZ.QFII`, `SZ.HK`). It parses the
+exchange into the A-share suffix and stores the remaining value as the channel.
+For duplicate date-symbol rows, a positive-quantity row with the lowest annual
+rate is selected; ties use configured source order, channel, then source row.
+Quantity establishes availability only and does not size the equal-weight book.
+
+Fresh short sales require availability on both the signal and execution dates.
+An opened short remains eligible to hold or cover after later list disappearance;
+its selected borrow rate is locked (with share-weighted blending for later
+increases). Fees are deducted in the short simulator once at each calendar-day
+boundary using current pre-trade marked notional and Act/Act fractions, including
+weekends and holidays. Positions include the selected provider/channel, current
+availability, selected rate, locked rate, and sleeve for audit.
+
+Evaluation returns are `long - benchmark` for `long_only`, `benchmark + signed
+short P&L` for `short_only`, and `long P&L + signed short P&L` for `long_short`.
+Combined turnover is the sum of the 1.0-NAV sleeve turnovers; it is not divided
+by the 2.0 gross exposure.
+
+The benchmark-missing policy is applied identically to performance metrics and
+the PnL CSV. `research.py` supports exactly one sleeve (`long_only` or
+`short_only`); a short sweep uses this same SBL configuration and rejects a
+missing source list rather than silently producing an empty book.
 
 ## Input contracts
 
@@ -283,10 +332,10 @@ output directory contains:
 | `metrics_{P}_{B}.csv` | One row per portfolio size: annual return, volatility, Sharpe, max drawdown, Calmar, and annual turnover. |
 | `returns_{P}_{B}.csv` | Daily excess returns, one column per portfolio size. |
 | `cumrets_{P}_{B}.csv` | Cumulative daily excess returns. |
-| `portfolio_pnl_{N}.csv` | Daily strategy, benchmark, alpha, turnover, close-count, and cumulative PnL series. |
-| `positions_{N}.csv` | Actual position snapshots and their market, eligibility, forecast, and weight fields. |
+| `portfolio_pnl_{N}.csv` | Daily strategy, benchmark, mode-aware evaluation return, turnover, borrow cost, close-count, and cumulative PnL series. |
+| `positions_{N}.csv` | Actual position snapshots with market, eligibility, forecast, weight, sleeve, and SBL audit fields when applicable. |
 | `target_weights_{N}.csv` and `.parquet` | Ideal target-weight snapshots for intraday runs. |
-| `plots_long/` or `plots_short/` | Portfolio overview, metrics table, holding-period, and position-size charts. |
+| `plots_long/`, `plots_short/`, or `plots_long_short/` | Portfolio overview, metrics table, holding-period, and position-size charts. |
 
 ## Development
 

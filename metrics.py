@@ -81,6 +81,9 @@ def holding_period_stats(positions: pd.DataFrame) -> dict:
     idx = positions.index
     dates = idx.get_level_values("date").to_numpy()
     symbols = idx.get_level_values("symbol").to_numpy(dtype=object)
+    if "sleeve" in positions.columns:
+        sleeves = positions["sleeve"].to_numpy(dtype=object)
+        symbols = np.char.add(np.char.add(sleeves.astype(str), ":"), symbols.astype(str)).astype(object)
 
     if len(dates) == 0:
         empty = pd.Series(dtype=float)

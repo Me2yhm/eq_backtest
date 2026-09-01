@@ -61,6 +61,7 @@ from portfolio import PortfolioResult, generate_portfolio
 class PortfolioEvaluation:
     result: PortfolioResult
     portfolio_returns: pd.Series
+    borrow_cost: pd.Series
     turnover: pd.Series
     close_counts: pd.DataFrame
     excess: pd.Series
@@ -70,18 +71,37 @@ class PortfolioEvaluation:
 # ── Return computation ─────────────────────────────────────────────────────────
 
 
+
+def _strategy_mode(strategy_mode: str | None, is_short: bool | None) -> str:
+    mode = strategy_mode or ("short_only" if is_short else "long_only")
+    if mode not in {"long_only", "short_only", "long_short"}:
+        raise ValueError(f"Unsupported strategy mode: {mode!r}")
+    return mode
+
+
+def _evaluation_returns(portfolio_returns: pd.Series, benchmark_returns: pd.Series, mode: str) -> pd.Series:
+    if mode == "long_only":
+        return portfolio_returns - benchmark_returns
+    if mode == "short_only":
+        return portfolio_returns + benchmark_returns
+    return portfolio_returns
+
+
 def compute_returns(
     portfolio_returns: pd.Series,
     cost_turnover: pd.Series,
     turnover: pd.Series,
     bm_ret: pd.Series,
-    is_short: bool,
-    exclude_period: tuple | None,
+    is_short: bool | None = None,
+    exclude_period: tuple | None = None,
+    strategy_mode: str | None = None,
+    benchmark_missing_return_policy: str | None = None,
 ) -> tuple:
     """
     Compute daily excess returns and one-way turnover for a single portfolio.
 
-    Excess return = benchmark - portfolio (short) or portfolio - benchmark (long),
+    Evaluation return is strategy minus benchmark for long-only, benchmark plus
+    signed short P&L for short-only, and combined signed P&L for long-short.
     Transaction costs are already deducted by the share-based simulator.
 
     Returns
@@ -89,8 +109,13 @@ def compute_returns(
     excess_ret : daily excess return Series
     turnover   : daily one-way turnover Series for reporting
     """
-    bm_aligned = bm_ret.reindex(portfolio_returns.index)
-    excess = (bm_aligned - portfolio_returns) if is_short else (portfolio_returns - bm_aligned)
+    mode = _strategy_mode(strategy_mode, is_short)
+    benchmark = _align_benchmark_to_index(
+        bm_ret,
+        portfolio_returns.index,
+        missing_return_policy=benchmark_missing_return_policy,
+    )
+    excess = _evaluation_returns(portfolio_returns, benchmark, mode)
 
     # Keep the merged-branch evaluation convention: the exclusion interval is
     # removed only from the metric series, after the full backtest timeline has
@@ -124,18 +149,34 @@ def daily_sum_from_intraday(series_intraday: pd.Series, name: str) -> pd.Series:
     return series_intraday.groupby(series_intraday.index.normalize()).sum().rename(name)
 
 
-def _align_benchmark_to_index(bm_ret: pd.Series, index: pd.Index) -> pd.Series:
-    """Align daily benchmark returns to target index (daily or intraday datetime index)."""
+def _align_benchmark_to_index(
+    bm_ret: pd.Series,
+    index: pd.Index,
+    *,
+    missing_return_policy: str | None = None,
+) -> pd.Series:
+    """Align daily benchmark returns and apply the configured missing-return policy."""
+    policy = missing_return_policy or cfg.BENCHMARK_MISSING_RETURN_POLICY
+    if policy not in {"error", "zero"}:
+        raise ValueError("benchmark_missing_return_policy must be 'error' or 'zero'")
     bm_daily = bm_ret.copy()
     bm_daily.index = pd.to_datetime(bm_daily.index).normalize()
     if bm_daily.index.has_duplicates:
         bm_daily = bm_daily.groupby(level=0).sum()
-    if isinstance(index, pd.DatetimeIndex):
-        aligned_values = bm_daily.reindex(index.normalize()).to_numpy()
-        return pd.Series(aligned_values, index=index, name=bm_ret.name)
-    target_index = pd.to_datetime(index)
-    aligned_values = bm_daily.reindex(target_index.normalize()).to_numpy()
-    return pd.Series(aligned_values, index=index, name=bm_ret.name)
+    target_index = index.normalize() if isinstance(index, pd.DatetimeIndex) else pd.to_datetime(index).normalize()
+    aligned = pd.Series(bm_daily.reindex(target_index).to_numpy(), index=index, name=bm_ret.name)
+    missing = aligned.isna()
+    if not missing.any():
+        return aligned
+    if policy == "zero":
+        return aligned.fillna(0.0)
+    missing_dates = pd.DatetimeIndex(aligned.index[missing]).normalize().unique()
+    preview = ", ".join(stamp.strftime("%Y-%m-%d") for stamp in missing_dates[:5])
+    suffix = "" if len(missing_dates) <= 5 else ", ..."
+    raise ValueError(
+        f"Benchmark returns are missing for {len(missing_dates)} backtest date(s): {preview}{suffix}. "
+        "Set benchmark_missing_return_policy: zero only when zero is intended."
+    )
 
 
 def _write_positions_csv(positions: pd.DataFrame, output_path: str) -> None:
@@ -157,16 +198,24 @@ def _build_portfolio_pnl_frame(
     portfolio_returns: pd.Series,
     cost_turnover: pd.Series,
     turnover: pd.Series,
+    borrow_cost: pd.Series,
     bm_ret: pd.Series,
     close_counts: pd.DataFrame,
-    is_short: bool,
-    exclude_period: tuple | None,
+    is_short: bool | None = None,
+    exclude_period: tuple | None = None,
+    strategy_mode: str | None = None,
+    benchmark_missing_return_policy: str | None = None,
 ) -> pd.DataFrame:
-    daily_benchmark = _align_benchmark_to_index(bm_ret, portfolio_returns.index).fillna(0.0).rename("daily_benchmark")
+    daily_benchmark = _align_benchmark_to_index(
+        bm_ret,
+        portfolio_returns.index,
+        missing_return_policy=benchmark_missing_return_policy,
+    ).rename("daily_benchmark")
+    mode = _strategy_mode(strategy_mode, is_short)
     daily_tto = turnover.rename("daily_tto").copy()
+    daily_borrow_cost = borrow_cost.reindex(portfolio_returns.index).fillna(0.0).rename("daily_borrow_cost")
     daily_strategy = portfolio_returns.rename("daily_strategy")
-    daily_alpha = (daily_strategy + daily_benchmark) if is_short else (daily_strategy - daily_benchmark)
-    daily_alpha = daily_alpha.rename("daily_alpha")
+    daily_alpha = _evaluation_returns(portfolio_returns, daily_benchmark, mode).rename("daily_alpha")
 
     all_pl = daily_strategy.cumsum().rename("all_pl")
     alpha_pl = daily_alpha.cumsum().rename("alpha_pl")
@@ -184,6 +233,7 @@ def _build_portfolio_pnl_frame(
         daily_benchmark = daily_benchmark[keep]
         daily_alpha = daily_alpha[keep]
         daily_tto = daily_tto[keep]
+        daily_borrow_cost = daily_borrow_cost[keep]
         close_count = close_count[keep]
 
     frame = pd.concat(
@@ -195,6 +245,7 @@ def _build_portfolio_pnl_frame(
             daily_benchmark,
             daily_alpha,
             daily_tto,
+            daily_borrow_cost,
             close_count,
         ],
         axis=1,
@@ -208,20 +259,24 @@ def evaluate_portfolio_result(
     bm_ret: pd.Series,
     frequency: str,
     agg_mode: str,
-    is_short: bool,
+    is_short: bool | None,
     compounding: bool,
+    strategy_mode: str | None = None,
+    benchmark_missing_return_policy: str | None = None,
 ) -> PortfolioEvaluation:
     """Evaluate one simulator result using the project's excess-return metric."""
     is_intraday = frequency != "daily"
     if is_intraday:
         portfolio_returns = daily_returns_from_intraday(result.portfolio_returns, agg_mode=agg_mode)
         turnover = daily_sum_from_intraday(result.turnover, "turnover")
+        borrow_cost = daily_sum_from_intraday(result.borrow_cost, "borrow_cost")
         close_counts = pd.DataFrame({
             "n_closed": daily_sum_from_intraday(result.close_counts["n_closed"], "n_closed").astype(int)
         })
     else:
         portfolio_returns = result.portfolio_returns
         turnover = result.turnover
+        borrow_cost = result.borrow_cost
         close_counts = result.close_counts
 
     excess, _ = compute_returns(
@@ -231,15 +286,20 @@ def evaluate_portfolio_result(
         bm_ret,
         is_short=is_short,
         exclude_period=cfg.EXCLUDE_PERIOD,
+        strategy_mode=strategy_mode,
+        benchmark_missing_return_policy=benchmark_missing_return_policy,
     )
     portfolio_pnl = _build_portfolio_pnl_frame(
         portfolio_returns=portfolio_returns,
         cost_turnover=result.cost_turnover,
         turnover=turnover,
+        borrow_cost=borrow_cost,
         bm_ret=bm_ret,
         close_counts=close_counts,
         is_short=is_short,
         exclude_period=cfg.EXCLUDE_PERIOD,
+        strategy_mode=strategy_mode,
+        benchmark_missing_return_policy=benchmark_missing_return_policy,
     )
     metrics = portfolio_metrics(excess, compounding=compounding)
     metrics["Ann. Turnover"] = float(turnover.mean() * 242) if not turnover.empty else 0.0
@@ -247,11 +307,50 @@ def evaluate_portfolio_result(
         result=result,
         portfolio_returns=portfolio_returns,
         turnover=turnover,
+        borrow_cost=borrow_cost,
         close_counts=close_counts,
         excess=excess,
         metrics=metrics,
         portfolio_pnl=portfolio_pnl,
     )
+
+
+
+def _with_sleeve(result: PortfolioResult, sleeve: str) -> PortfolioResult:
+    positions = result.positions.copy()
+    positions["sleeve"] = sleeve
+    target_weights = None
+    if result.target_weights is not None:
+        target_weights = result.target_weights.copy()
+        target_weights["sleeve"] = sleeve
+    return PortfolioResult(
+        positions=positions,
+        close_counts=result.close_counts,
+        portfolio_returns=result.portfolio_returns,
+        cost_turnover=result.cost_turnover,
+        borrow_cost=result.borrow_cost,
+        turnover=result.turnover,
+        held_counts=result.held_counts,
+        target_weights=target_weights,
+    )
+
+
+def _combine_sleeves(long_result: PortfolioResult, short_result: PortfolioResult) -> PortfolioResult:
+    positions = pd.concat([long_result.positions, short_result.positions]).sort_index()
+    target_weights = None
+    if long_result.target_weights is not None and short_result.target_weights is not None:
+        target_weights = pd.concat([long_result.target_weights, short_result.target_weights]).sort_index()
+    return PortfolioResult(
+        positions=positions,
+        close_counts=long_result.close_counts.add(short_result.close_counts, fill_value=0).astype(int),
+        portfolio_returns=long_result.portfolio_returns.add(short_result.portfolio_returns, fill_value=0.0),
+        cost_turnover=long_result.cost_turnover.add(short_result.cost_turnover, fill_value=0.0),
+        borrow_cost=long_result.borrow_cost.add(short_result.borrow_cost, fill_value=0.0),
+        turnover=long_result.turnover.add(short_result.turnover, fill_value=0.0),
+        held_counts=long_result.held_counts.add(short_result.held_counts, fill_value=0).astype(int),
+        target_weights=target_weights,
+    )
+
 
 
 def run_single_portfolio(
@@ -272,7 +371,11 @@ def run_single_portfolio(
     weight_mode: str = "equal",
     max_weight_multiple: float = 2.0,
     output_dir: str = "",
+    sbl_enabled: bool = False,
 ) -> PortfolioEvaluation:
+    if is_short and not sbl_enabled:
+        raise ValueError("Short portfolios require a pool built with explicit short_borrow_sources")
+
     result = generate_portfolio(
         pool=pool,
         port_size=port_size,
@@ -290,8 +393,16 @@ def run_single_portfolio(
         weight_mode=weight_mode,
         max_weight_multiple=max_weight_multiple,
     )
-    return evaluate_portfolio_result(result, bm_ret, frequency, agg_mode, is_short, compounding)
+    return evaluate_portfolio_result(
+        result,
+        bm_ret,
+        frequency,
+        agg_mode,
+        is_short,
+        compounding,
 
+        strategy_mode="short_only" if is_short else "long_only",
+    )
 
 # ── Logging helper ─────────────────────────────────────────────────────────────
 
@@ -307,12 +418,48 @@ def _log_holding_stats(stats: dict, port_size: int) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 
-def run() -> None:
-    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-    output_dir = str(cfg.OUTPUT_DIR) + os.sep
-    logger.info("Run directory: {} (config: {})", cfg.RUN_DIR, cfg.CONFIG_PATH)
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+
+def _mode_result(
+    pool,
+    mode: str,
+    *,
+    port_size: int,
+    output_dir: str,
+) -> PortfolioResult:
+    common = {
+        "pool": pool,
+        "port_size": port_size,
+        "thresh_out_buffer": cfg.THRESH_OUT_BUFFER,
+        "size_cut": cfg.POOL_SIZE,
+        "close_on_size_drop": cfg.CLOSE_ON_SIZE_DROP,
+        "trade_on_next_bar": cfg.trade_on_next_bar_for(cfg.FREQUENCY),
+        "strict_first_bar_top_n": cfg.STRICT_FIRST_BAR_TOP_N,
+        "output_dir": output_dir,
+        "plot_heatmap": False,
+        "record_target_weights": cfg.FREQUENCY != "daily",
+        "debug_mode": cfg.DEBUG,
+        "debug_symbol": cfg.DEBUG_SYMBOL,
+        "debug_datetime": cfg.DEBUG_DATETIME,
+        "cost_per_turnover": cfg.COST_PER_TURNOVER,
+        "portfolio_initial_value": cfg.PORTFOLIO_INITIAL_VALUE,
+        "weight_mode": cfg.WEIGHT_MODE,
+        "max_weight_multiple": cfg.MAX_WEIGHT_MULTIPLE,
+    }
+    if mode == "long_only":
+        return _with_sleeve(generate_portfolio(is_short=False, **common), "long")
+    short_result = _with_sleeve(generate_portfolio(is_short=True, **common), "short")
+    if mode == "short_only":
+        return short_result
+    long_result = _with_sleeve(generate_portfolio(is_short=False, **common), "long")
+    return _combine_sleeves(long_result, short_result)
+
+
+def run() -> None:
+    logger.info("Run directory: {} (config: {})", cfg.RUN_DIR, cfg.CONFIG_PATH)
+    needs_short = any(mode != "long_only" for mode in cfg.STRATEGY_MODES)
+    if needs_short and not cfg.SHORT_BORROW_SOURCES:
+        raise ValueError("short_only and long_short modes require short_borrow_sources")
     bm_ret = load_benchmark_returns(
         cfg.MARKET_CACHE_DIR,
         cfg.BENCHMARK_SYMBOL,
@@ -329,110 +476,81 @@ def run() -> None:
         cache_dir=cfg.POOL_CACHE_DIR,
         nosuspend_days=cfg.NOSUSPEND_DAYS,
         prediction_merge_mode=cfg.PREDICTION_MERGE_MODE,
+        short_borrow_sources=cfg.SHORT_BORROW_SOURCES if needs_short else None,
+        borrow_selection=cfg.BORROW_SELECTION,
     )
 
-    # ── Run for each portfolio size ───────────────────────────────────────────
-    all_metrics = {}
-    all_ret = {}
-    all_cumrets = {}
-    all_port_sizes = {}
-    all_closes = {}
-
-    for port_size in cfg.PORT_SIZES:
-        logger.info("── Portfolio size: {} ──", port_size)
-
-        result = generate_portfolio(
-            pool=pool,
-            port_size=port_size,
-            thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
-            size_cut=cfg.POOL_SIZE,
-            close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
-            trade_on_next_bar=cfg.trade_on_next_bar_for(cfg.FREQUENCY),
-            strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
-            is_short=cfg.IS_SHORT,
-            output_dir=output_dir,
-            record_target_weights=cfg.FREQUENCY != "daily",
-            debug_mode=cfg.DEBUG,
-            debug_symbol=cfg.DEBUG_SYMBOL,
-            debug_datetime=cfg.DEBUG_DATETIME,
-            cost_per_turnover=cfg.COST_PER_TURNOVER,
-            portfolio_initial_value=cfg.PORTFOLIO_INITIAL_VALUE,
-            weight_mode=cfg.WEIGHT_MODE,
-            max_weight_multiple=cfg.MAX_WEIGHT_MULTIPLE,
-        )
-
-        positions = result.positions
-        close_counts = result.close_counts
-        _write_positions_csv(positions, f"{output_dir}positions_{port_size}.csv")
-        if result.target_weights is not None:
-            _write_target_weights(
-                result.target_weights,
-                f"{output_dir}target_weights_{port_size}.csv",
-                f"{output_dir}target_weights_{port_size}.parquet",
+    for mode in cfg.STRATEGY_MODES:
+        mode_dir = cfg.output_dir_for_mode(mode)
+        mode_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = str(mode_dir) + os.sep
+        all_metrics, all_ret, all_cumrets, all_port_sizes, all_closes = {}, {}, {}, {}, {}
+        for port_size in cfg.PORT_SIZES:
+            logger.info("── {} portfolio size: {} ──", mode, port_size)
+            result = _mode_result(pool, mode, port_size=port_size, output_dir=output_dir)
+            _write_positions_csv(result.positions, f"{output_dir}positions_{port_size}.csv")
+            if result.target_weights is not None:
+                _write_target_weights(
+                    result.target_weights,
+                    f"{output_dir}target_weights_{port_size}.csv",
+                    f"{output_dir}target_weights_{port_size}.parquet",
+                )
+            evaluation = evaluate_portfolio_result(
+                result=result,
+                bm_ret=bm_ret,
+                frequency=cfg.FREQUENCY,
+                agg_mode=cfg.AGG_MODE,
+                is_short=mode == "short_only",
+                compounding=cfg.COMPOUNDING,
+                strategy_mode=mode,
             )
-        evaluation = evaluate_portfolio_result(
-            result=result,
-            bm_ret=bm_ret,
-            frequency=cfg.FREQUENCY,
-            agg_mode=cfg.AGG_MODE,
-            is_short=cfg.IS_SHORT,
-            compounding=cfg.COMPOUNDING,
+            evaluation.portfolio_pnl.to_csv(
+                f"{output_dir}portfolio_pnl_{port_size}.csv",
+                index_label="date",
+                float_format="%.8f",
+            )
+            all_metrics[port_size] = evaluation.metrics
+            all_ret[port_size] = evaluation.excess.rename(f"Port_{port_size}")
+            all_cumrets[port_size] = evaluation.excess.cumsum().rename(f"Port_{port_size}")
+            all_port_sizes[port_size] = result.held_counts.rename(f"Port_{port_size}")
+            if not evaluation.close_counts.empty:
+                all_closes[port_size] = evaluation.close_counts.rename(columns={"n_closed": f"Port_{port_size}"})
+            hp = holding_period_stats(result.positions)
+            plot_holding_periods(
+                hp,
+                port_size,
+                is_short=mode == "short_only",
+                output_path=output_dir,
+                strategy_mode=mode,
+            )
+            _log_holding_stats(hp, port_size)
+
+        metrics_df = pd.DataFrame(all_metrics).T
+        cumrets_df = pd.DataFrame(all_cumrets)
+        ret_df = pd.DataFrame(all_ret)
+        port_sizes_df = pd.DataFrame(all_port_sizes)
+        close_df = pd.concat(list(all_closes.values()), axis=1) if all_closes else pd.DataFrame()
+        tag = f"{cfg.POOL_SIZE}_{cfg.BENCHMARK_SYMBOL}"
+        metrics_df.to_csv(f"{output_dir}metrics_{tag}.csv")
+        cumrets_df.to_csv(f"{output_dir}cumrets_{tag}.csv")
+        ret_df.to_csv(f"{output_dir}returns_{tag}.csv")
+        logger.info("── {} metrics ──\n{}", mode, metrics_df.to_string())
+        plot_portfolio_results(
+            cumrets_df,
+            port_sizes_df,
+            close_df,
+            is_short=mode == "short_only",
+            output_path=output_dir,
+            strategy_mode=mode,
         )
-        excess = evaluation.excess
-        turnover = evaluation.turnover
-        close_counts_eval = evaluation.close_counts
-        portfolio_pnl = evaluation.portfolio_pnl
-        portfolio_pnl.to_csv(
-            f"{output_dir}portfolio_pnl_{port_size}.csv",
-            index_label="date",
-            float_format="%.8f",
+        plot_metrics_table(
+            metrics_df,
+            cfg.POOL_SIZE,
+            cfg.BENCHMARK_SYMBOL,
+            is_short=mode == "short_only",
+            output_path=output_dir,
+            strategy_mode=mode,
         )
-
-        m = evaluation.metrics
-        all_metrics[port_size] = m
-        all_ret[port_size] = excess.rename(f"Port_{port_size}")
-        all_cumrets[port_size] = excess.cumsum().rename(f"Port_{port_size}")
-        all_port_sizes[port_size] = result.held_counts.rename(f"Port_{port_size}")
-
-        if not close_counts_eval.empty:
-            close_counts_eval.columns = [f"Port_{port_size}"]
-            all_closes[port_size] = close_counts_eval
-
-        # Holding-period analysis
-        hp = holding_period_stats(positions)
-        plot_holding_periods(hp, port_size, is_short=cfg.IS_SHORT, output_path=output_dir)
-        _log_holding_stats(hp, port_size)
-
-    # ── Aggregate, save, and plot ─────────────────────────────────────────────
-    metrics_df = pd.DataFrame(all_metrics).T
-    cumrets_df = pd.DataFrame(all_cumrets)
-    ret_df = pd.DataFrame(all_ret)
-    port_sizes_df = pd.DataFrame(all_port_sizes)
-    close_df = pd.concat(list(all_closes.values()), axis=1) if all_closes else pd.DataFrame()
-
-    tag = f"{cfg.POOL_SIZE}_{cfg.BENCHMARK_SYMBOL}"
-    metrics_df.to_csv(f"{output_dir}metrics_{tag}.csv")
-    cumrets_df.to_csv(f"{output_dir}cumrets_{tag}.csv")
-    ret_df.to_csv(f"{output_dir}returns_{tag}.csv")
-
-    logger.info("── Metrics ──\n{}", metrics_df.to_string())
-
-    plot_portfolio_results(
-        cumrets_df,
-        port_sizes_df,
-        close_df,
-        is_short=cfg.IS_SHORT,
-        output_path=output_dir,
-    )
-    plot_metrics_table(
-        metrics_df,
-        cfg.POOL_SIZE,
-        cfg.BENCHMARK_SYMBOL,
-        is_short=cfg.IS_SHORT,
-        output_path=output_dir,
-    )
-
-
 if __name__ == "__main__":
     import time
 

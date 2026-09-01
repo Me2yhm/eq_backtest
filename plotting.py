@@ -22,11 +22,29 @@ HEATMAP_MAX_SIZE_RANK = 6_000
 # ── Shared helper ──────────────────────────────────────────────────────────────
 
 
-def _ensure_plot_dir(output_path: str, is_short: bool) -> str:
-    subdir = "plots_short" if is_short else "plots_long"
-    path = os.path.join(output_path, subdir)
+_PLOT_MODE_LABELS = {
+    "long_only": "Long",
+    "short_only": "Short",
+    "long_short": "Long-Short",
+}
+
+
+def _plot_mode(strategy_mode: str | None, is_short: bool) -> str:
+    mode = strategy_mode or ("short_only" if is_short else "long_only")
+    if mode not in _PLOT_MODE_LABELS:
+        raise ValueError(f"Unsupported strategy mode: {mode!r}")
+    return mode
+
+
+def _ensure_plot_dir(output_path: str, is_short: bool = False, strategy_mode: str | None = None) -> str:
+    mode = _plot_mode(strategy_mode, is_short)
+    path = os.path.join(output_path, f"plots_{mode.removesuffix('_only')}")
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def _plot_label(strategy_mode: str | None, is_short: bool) -> str:
+    return _PLOT_MODE_LABELS[_plot_mode(strategy_mode, is_short)]
 
 
 # ── Holding period ─────────────────────────────────────────────────────────────
@@ -37,6 +55,7 @@ def plot_holding_periods(
     port_num: int,
     is_short: bool = False,
     output_path: str = "output/",
+    strategy_mode: str | None = None,
 ) -> None:
     """
     Line chart of average, median (open positions) and average (closed positions)
@@ -68,13 +87,13 @@ def plot_holding_periods(
         alpha=0.5,
         label=f"Overall avg: {avg_open.mean():.1f} d",
     )
-    ax.set(title=f"Holding Days – Portfolio {port_num}", xlabel="Date", ylabel="Days")
+    ax.set(title=f"Holding Days – {_plot_label(strategy_mode, is_short)} Portfolio {port_num}", xlabel="Date", ylabel="Days")
     ax.legend()
     ax.grid(alpha=0.3)
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
 
-    pdir = _ensure_plot_dir(output_path, is_short)
+    pdir = _ensure_plot_dir(output_path, is_short, strategy_mode)
     fig.savefig(
         os.path.join(pdir, f"holding_days_p{port_num}.png"),
         dpi=300,
@@ -92,6 +111,7 @@ def plot_position_heatmap(
     port_num: int | None = None,
     is_short: bool = False,
     output_path: str = "output/",
+    strategy_mode: str | None = None,
 ) -> None:
     """Heatmap of position count across size-rank bins from 0 through 6,000."""
     if positions.empty:
@@ -139,7 +159,7 @@ def plot_position_heatmap(
     plt.tight_layout()
 
     fname = f"heatmap_p{port_num}.png" if port_num is not None else "heatmap.png"
-    pdir = _ensure_plot_dir(output_path, is_short)
+    pdir = _ensure_plot_dir(output_path, is_short, strategy_mode)
     fig.savefig(os.path.join(pdir, fname), dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -153,6 +173,7 @@ def plot_portfolio_results(
     close_counts: pd.DataFrame,
     is_short: bool = False,
     output_path: str = "output/",
+    strategy_mode: str | None = None,
 ) -> None:
     """
     Two-panel figure:
@@ -165,7 +186,9 @@ def plot_portfolio_results(
     ax2 = fig.add_subplot(gs[1], sharex=ax1)
 
     # ── Panel 1: cumulative returns + drawdowns ───────────────────────────────
-    cumrets.plot(ax=ax1, linewidth=2, grid=True, title="Portfolio Excess Return (Cumulative)")
+    mode = _plot_mode(strategy_mode, is_short)
+    title = "Long-Short Portfolio Return (Cumulative)" if mode == "long_short" else "Portfolio Excess Return (Cumulative)"
+    cumrets.plot(ax=ax1, linewidth=2, grid=True, title=title)
     ax1.set_ylabel("Cumulative Return")
 
     ax1_dd = ax1.twinx()
@@ -195,7 +218,7 @@ def plot_portfolio_results(
     ax2.grid(True)
 
     plt.tight_layout()
-    pdir = _ensure_plot_dir(output_path, is_short)
+    pdir = _ensure_plot_dir(output_path, is_short, strategy_mode)
     fig.savefig(os.path.join(pdir, "portfolio_results.png"), dpi=300, bbox_inches="tight")
     # plt.show()
 
@@ -209,6 +232,7 @@ def plot_metrics_table(
     benchmark_symbol: str,
     is_short: bool = False,
     output_path: str = "output/",
+    strategy_mode: str | None = None,
 ) -> None:
     """Save the metrics DataFrame as a formatted table image."""
     fig, ax = plt.subplots(figsize=(12, len(metrics_df) * 0.8 + 1))
@@ -234,7 +258,7 @@ def plot_metrics_table(
         tbl[(i + 1, -1)].set_facecolor(header_bg)
         tbl[(i + 1, -1)].set_text_props(weight="bold", color="white")
 
-    direction = "Short" if is_short else "Long"
+    direction = _plot_label(strategy_mode, is_short)
     ax.set_title(
         f"Portfolio Metrics ({direction} | Pool: {pool_size} | BM: {benchmark_symbol})",
         fontsize=12,
@@ -242,7 +266,7 @@ def plot_metrics_table(
         pad=20,
     )
 
-    pdir = _ensure_plot_dir(output_path, is_short)
+    pdir = _ensure_plot_dir(output_path, is_short, strategy_mode)
     fig.savefig(
         os.path.join(pdir, f"metrics_{pool_size}_{benchmark_symbol}.png"),
         dpi=300,

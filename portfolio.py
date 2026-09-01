@@ -9,6 +9,7 @@ generate_portfolio(pool, port_size, ...)  ->  PortfolioResult
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -25,10 +26,33 @@ class PortfolioResult:
     close_counts: pd.DataFrame
     portfolio_returns: pd.Series
     cost_turnover: pd.Series
+    borrow_cost: pd.Series
     turnover: pd.Series
     held_counts: pd.Series
     target_weights: pd.DataFrame | None = None
 
+
+def _borrow_calendar_fractions(bars: pd.DatetimeIndex) -> np.ndarray:
+    """Return Act/Act calendar fractions at each calendar day's first bar."""
+    fractions = np.zeros(len(bars), dtype=np.float64)
+    previous_day: date | None = None
+    for index, timestamp in enumerate(bars):
+        current_day = timestamp.date()
+        if current_day == previous_day:
+            continue
+        if previous_day is not None:
+            cursor = previous_day
+            fraction = 0.0
+            while cursor < current_day:
+                next_year = date(cursor.year + 1, 1, 1)
+                segment_end = min(current_day, next_year)
+                days = (segment_end - cursor).days
+                days_in_year = 366.0 if date(cursor.year, 12, 31).timetuple().tm_yday == 366 else 365.0
+                fraction += days / days_in_year
+                cursor = segment_end
+            fractions[index] = fraction
+        previous_day = current_day
+    return fractions
 
 def _weight_mode_code(weight_mode: str) -> int:
     modes = {"equal": 0, "rank_linear": 1, "rank_square": 2}
@@ -134,6 +158,9 @@ def _simulate_portfolio_core(
     can_open: np.ndarray,
     can_close: np.ndarray,
     n_symbols: int,
+    borrow_available: np.ndarray,
+    borrow_rate: np.ndarray,
+    bar_borrow_fractions: np.ndarray,
     port_size: int,
     thresh_out: int,
     size_cut: int,
@@ -164,6 +191,9 @@ def _simulate_portfolio_core(
     portfolio_value = portfolio_initial_value
     current_shares = np.zeros(n_symbols, dtype=np.float64)  # 持仓股数
 
+    locked_borrow_rate = np.zeros(n_symbols, dtype=np.float64)
+    borrowed_shares = np.zeros(n_symbols, dtype=np.float64)
+    borrow_added_weight = np.zeros(n_symbols, dtype=np.float64)
     current_row = np.full(n_symbols, -1, dtype=np.int64)
     signal_row_by_symbol = np.full(n_symbols, -1, dtype=np.int64)
     rank_by_symbol = np.zeros(n_symbols, dtype=np.int32)
@@ -190,6 +220,7 @@ def _simulate_portfolio_core(
     bar_turnover = np.zeros(n_bars, dtype=np.float64)
     bar_returns = np.zeros(n_bars, dtype=np.float64)
     held_counts = np.zeros(n_bars, dtype=np.int32)
+    bar_borrow_cost = np.zeros(n_bars, dtype=np.float64)
 
     # Exact recording capacity for the current run. This can be larger than the
     # previous n_bars * port_size bound because progressive actual holdings can
@@ -204,6 +235,7 @@ def _simulate_portfolio_core(
     rec_vwap_ret = np.empty(record_capacity, dtype=np.float64)
     rec_tradable = np.empty(record_capacity, dtype=np.bool_)
     rec_count = 0
+    rec_locked_borrow_rate = np.empty(record_capacity, dtype=np.float64)
 
     target_record_capacity = n_bars * port_size if record_target else 0
     target_rec_bar_idx = np.empty(target_record_capacity, dtype=np.int32)
@@ -246,6 +278,7 @@ def _simulate_portfolio_core(
         signal_row_by_symbol[:] = -1
         rank_by_symbol[:] = 0
         signal_in_size_pool[:] = False
+        borrow_added_weight[:] = 0.0
 
         bar_start = bar_offsets[bar_idx]
         bar_end = bar_offsets[bar_idx + 1]
@@ -272,6 +305,22 @@ def _simulate_portfolio_core(
                 if cp > 0 and v > 0:
                     prev_pnl += sh * (v - cp)
             portfolio_value += prev_pnl
+        borrow_cost = 0.0
+        if is_short:
+            borrow_fraction = bar_borrow_fractions[bar_idx]
+            if borrow_fraction > 0.0:
+                for i in range(held_count):
+                    symbol_id = held_symbols[i]
+                    row_idx = current_row[symbol_id]
+                    if row_idx == -1:
+                        continue
+                    sh = current_shares[symbol_id]
+                    rate = locked_borrow_rate[symbol_id]
+                    v = execution_vwap[row_idx]
+                    if sh < -eps and rate > 0.0 and v > 0.0:
+                        borrow_cost += -sh * v * rate * borrow_fraction
+                portfolio_value -= borrow_cost
+        bar_borrow_cost[bar_idx] = borrow_cost
 
         # Step 2: 调仓前盯市权重 (对齐 compute_external_metrics.py L345-352)
         # current_weights_np = shares × vwap / portfolio_value (portfolio_value 已含 prev_pnl)
@@ -335,7 +384,8 @@ def _simulate_portfolio_core(
                         debug_has_signal_row = 1
 
                     in_size_pool = size_rank[signal_row_idx] <= size_cut
-                    if in_size_pool:
+                    signal_borrowable = (not is_short) or borrow_available[signal_row_idx] or held[symbol_id]
+                    if in_size_pool and signal_borrowable:
                         signal_in_size_pool[symbol_id] = True
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
                             debug_can_open_base = 1
@@ -343,7 +393,7 @@ def _simulate_portfolio_core(
 
                     # External eligible rank uses ideal entry holdings, not the
                     # actual execution state.
-                    if signal_in_size_pool[symbol_id] or target[symbol_id]:
+                    if signal_in_size_pool[symbol_id] or (target[symbol_id] and ((not is_short) or held[symbol_id])):
                         rank += 1
                         rank_by_symbol[symbol_id] = rank
                         if debug_this_bar and symbol_id == debug_target_symbol_id:
@@ -519,7 +569,7 @@ def _simulate_portfolio_core(
                 deficit = target_weight_by_symbol[symbol_id] - current_weights[symbol_id]
                 if deficit > eps:
                     buy_candidates[buy_count] = symbol_id
-                    buy_keys[buy_count] = -pred[row_idx] + symbol_id * 1e-12
+                    buy_keys[buy_count] = (pred[row_idx] if is_short else -pred[row_idx]) + symbol_id * 1e-12
                     buy_count += 1
 
             if debug_this_bar:
@@ -558,6 +608,8 @@ def _simulate_portfolio_core(
                         held_count += 1
                     if debug_this_bar and symbol_id == debug_target_symbol_id:
                         debug_reason = 200
+                    if is_short:
+                        borrow_added_weight[symbol_id] += buy_w
 
             if debug_this_bar and debug_close_reason < 0:
                 if current_weights[debug_target_symbol_id] <= eps:
@@ -697,6 +749,28 @@ def _simulate_portfolio_core(
                 if current_weights[symbol_id] <= eps:
                     current_shares[symbol_id] = 0.0
 
+        if is_short:
+            for i in range(held_count):
+                symbol_id = held_symbols[i]
+                new_borrowed = -current_shares[symbol_id]
+                old_borrowed = borrowed_shares[symbol_id]
+                if new_borrowed <= eps:
+                    locked_borrow_rate[symbol_id] = 0.0
+                    borrowed_shares[symbol_id] = 0.0
+                    continue
+                if new_borrowed > old_borrowed + eps and borrow_added_weight[symbol_id] > eps:
+                    row_idx = current_row[symbol_id]
+                    if row_idx != -1:
+                        locked_borrow_rate[symbol_id] = (
+                            old_borrowed * locked_borrow_rate[symbol_id]
+                            + (new_borrowed - old_borrowed) * borrow_rate[row_idx]
+                        ) / new_borrowed
+                borrowed_shares[symbol_id] = new_borrowed
+            for i in range(prev_count):
+                symbol_id = prev_symbols[i]
+                if current_weights[symbol_id] <= eps:
+                    borrowed_shares[symbol_id] = 0.0
+                    locked_borrow_rate[symbol_id] = 0.0
         # Step 4: 本期持仓 vwap→close 收益 (L834-838)
         current_pnl = 0.0
         for i in range(held_count):
@@ -715,7 +789,7 @@ def _simulate_portfolio_core(
 
         # Step 5: 记录收益率 (L840-863, 分母 = prev_capital)
         if abs(prev_capital) > eps:
-            bar_ret = (prev_pnl + current_pnl - transaction_cost) / prev_capital
+            bar_ret = (prev_pnl + current_pnl - transaction_cost - borrow_cost) / prev_capital
         else:
             bar_ret = 0.0
         bar_turnover[bar_idx] = turnover
@@ -739,6 +813,7 @@ def _simulate_portfolio_core(
             rec_bar_idx[rec_count] = bar_idx
             rec_symbol_id[rec_count] = symbol_id
             rec_weight[rec_count] = current_weights[symbol_id]
+            rec_locked_borrow_rate[rec_count] = locked_borrow_rate[symbol_id]
             if row_idx == -1:
                 rec_source_row[rec_count] = -1
                 rec_size_rank[rec_count] = np.nan
@@ -776,11 +851,13 @@ def _simulate_portfolio_core(
         rec_size_rank[:rec_count],
         rec_vwap_ret[:rec_count],
         rec_tradable[:rec_count],
+        rec_locked_borrow_rate[:rec_count],
         target_rec_bar_idx[:target_rec_count],
         target_rec_symbol_id[:target_rec_count],
         target_rec_weight[:target_rec_count],
         close_counts,
         bar_turnover,
+        bar_borrow_cost,
         bar_returns,
         held_counts,
         debug_reason,
@@ -815,6 +892,7 @@ def _materialize_positions(
     rec_size_rank: np.ndarray,
     rec_vwap_ret: np.ndarray,
     rec_tradable: np.ndarray,
+    rec_locked_borrow_rate: np.ndarray,
 ) -> pd.DataFrame:
     columns = [
         "turnover",
@@ -834,6 +912,11 @@ def _materialize_positions(
         "pred",
         "pred_rank",
         "vwap_ret",
+        "borrow_available",
+        "borrow_rate",
+        "borrow_provider",
+        "borrow_channel",
+        "locked_borrow_rate",
     ]
     if rec_source_row.size == 0:
         empty = pd.DataFrame(columns=["date", "symbol", *columns])
@@ -850,6 +933,7 @@ def _materialize_positions(
         "tradable": rec_tradable,
         "pred_rank": rec_pred_rank,
         "vwap_ret": rec_vwap_ret,
+        "locked_borrow_rate": rec_locked_borrow_rate,
     }).with_columns(pl.col("snapshot_bar").dt.date().alias("snapshot_date"))
 
     daily_columns = [
@@ -871,6 +955,10 @@ def _materialize_positions(
         "is_limit_down",
         "can_open",
         "pred",
+        "borrow_available",
+        "borrow_rate",
+        "borrow_provider",
+        "borrow_channel",
     ]
 
     positions = (
@@ -895,6 +983,8 @@ def _materialize_positions(
             pl.col("is_limit_up").fill_null(False),
             pl.col("is_limit_down").fill_null(False),
             pl.col("can_open").fill_null(False),
+            pl.col("borrow_available").fill_null(False),
+            pl.col("borrow_rate").fill_null(0.0),
         ])
         .select([
             "date",
@@ -916,6 +1006,11 @@ def _materialize_positions(
             "pred",
             "pred_rank",
             "vwap_ret",
+            "borrow_available",
+            "borrow_rate",
+            "borrow_provider",
+            "borrow_channel",
+            "locked_borrow_rate",
         ])
     )
 
@@ -968,9 +1063,12 @@ def generate_portfolio(
     sorted_rows, sorted_offsets = _build_bar_orders(pool, ascending=is_short)
 
     can_open_exec = (pool.can_trade_sell if is_short else pool.can_trade_buy) & pool.can_open_base
+    if is_short:
+        can_open_exec = can_open_exec & pool.borrow_available
     can_close_exec = pool.can_trade_buy if is_short else pool.can_trade_sell
     bars = pd.to_datetime(pool.bars)
     bar_day_index = pd.factorize(bars.normalize())[0].astype(np.int32)
+    bar_borrow_fractions = _borrow_calendar_fractions(bars)
     debug_target_symbol_id, debug_target_bar_idx = (
         _resolve_debug_target_indices(pool, debug_symbol, debug_datetime) if debug_mode else (-1, -1)
     )
@@ -984,11 +1082,13 @@ def generate_portfolio(
         rec_size_rank,
         rec_vwap_ret,
         rec_tradable,
+        rec_locked_borrow_rate,
         target_rec_bar_idx,
         target_rec_symbol_id,
         target_rec_weight,
         close_counts_arr,
         turnover_arr,
+        borrow_cost_arr,
         bar_returns_arr,
         held_counts_arr,
         debug_reason,
@@ -1027,6 +1127,9 @@ def generate_portfolio(
         can_open=can_open_exec,
         can_close=can_close_exec,
         n_symbols=len(pool.symbols),
+        borrow_available=pool.borrow_available,
+        borrow_rate=pool.borrow_rate,
+        bar_borrow_fractions=bar_borrow_fractions,
         port_size=port_size,
         thresh_out=thresh_out,
         size_cut=size_cut,
@@ -1083,11 +1186,13 @@ def generate_portfolio(
         rec_size_rank=rec_size_rank,
         rec_vwap_ret=rec_vwap_ret,
         rec_tradable=rec_tradable,
+        rec_locked_borrow_rate=rec_locked_borrow_rate,
     )
 
     close_counts = pd.DataFrame({"n_closed": close_counts_arr}, index=bars)
     portfolio_returns = pd.Series(bar_returns_arr, index=bars, name="portfolio_return")
     turnover = pd.Series(turnover_arr, index=bars, name="turnover")
+    borrow_cost = pd.Series(borrow_cost_arr, index=bars, name="borrow_cost")
     held_counts = pd.Series(held_counts_arr, index=bars, name="held_count")
     target_weights = None
     if record_target_weights:
@@ -1107,6 +1212,7 @@ def generate_portfolio(
         close_counts=close_counts,
         portfolio_returns=portfolio_returns,
         cost_turnover=turnover.copy().rename("cost_turnover"),
+        borrow_cost=borrow_cost,
         turnover=turnover,
         held_counts=held_counts,
         target_weights=target_weights,
@@ -1132,9 +1238,12 @@ def generate_target_weights(
     sorted_rows, sorted_offsets = _build_bar_orders(pool, ascending=is_short)
 
     can_open_exec = (pool.can_trade_sell if is_short else pool.can_trade_buy) & pool.can_open_base
+    if is_short:
+        can_open_exec = can_open_exec & pool.borrow_available
     can_close_exec = pool.can_trade_buy if is_short else pool.can_trade_sell
     bars = pd.to_datetime(pool.bars)
     bar_day_index = pd.factorize(bars.normalize())[0].astype(np.int32)
+    bar_borrow_fractions = _borrow_calendar_fractions(bars)
 
     (
         _rec_bar_idx,
@@ -1145,11 +1254,13 @@ def generate_target_weights(
         _rec_size_rank,
         _rec_vwap_ret,
         _rec_tradable,
+        _rec_locked_borrow_rate,
         target_rec_bar_idx,
         target_rec_symbol_id,
         target_rec_weight,
         _close_counts_arr,
         _turnover_arr,
+        _borrow_cost_arr,
         _bar_returns_arr,
         _held_counts_arr,
         _debug_reason,
@@ -1188,6 +1299,9 @@ def generate_target_weights(
         can_open=can_open_exec,
         can_close=can_close_exec,
         n_symbols=len(pool.symbols),
+        borrow_available=pool.borrow_available,
+        borrow_rate=pool.borrow_rate,
+        bar_borrow_fractions=bar_borrow_fractions,
         port_size=port_size,
         thresh_out=thresh_out,
         size_cut=size_cut,

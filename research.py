@@ -18,7 +18,7 @@ from run import run_single_portfolio
 
 def _signal_frame(pool: BacktestDataset, pool_size: int, is_short: bool = False) -> pl.DataFrame:
     """Return the minimum frame needed for same-timestamp signal validation."""
-    frame = pool.pool_frame.select([
+    columns = [
         "datetime",
         "symbol",
         "pred",
@@ -26,7 +26,10 @@ def _signal_frame(pool: BacktestDataset, pool_size: int, is_short: bool = False)
         "size_rank",
         "can_open_base",
         "can_open",
-    ])
+    ]
+    if is_short:
+        columns.append("borrow_available")
+    frame = pool.pool_frame.select(columns)
     if frame.schema["datetime"] == pl.String:
         frame = frame.with_columns(pl.col("datetime").str.to_datetime(strict=False))
     else:
@@ -38,9 +41,10 @@ def _signal_frame(pool: BacktestDataset, pool_size: int, is_short: bool = False)
         & pl.col("vwap_ret").is_finite()
     )
     if is_short:
-        # The project currently uses the same executable flag for validation;
-        # rank direction is handled by the rank columns below.
-        frame = frame.with_columns((pl.lit(1) - pl.col("pred")).alias("__rank_signal"))
+        frame = frame.with_columns([
+            (pl.col("can_open") & pl.col("borrow_available").fill_null(False)).alias("can_open"),
+            (pl.lit(1) - pl.col("pred")).alias("__rank_signal"),
+        ])
     else:
         frame = frame.with_columns(pl.col("pred").alias("__rank_signal"))
     return frame.with_columns([
@@ -158,6 +162,13 @@ def _slice_dataset(pool: BacktestDataset, start: str, end: str) -> BacktestDatas
     return _encode_dataset(frame, derive_prev_close=True)
 
 
+def _research_is_short() -> bool:
+    modes = cfg.STRATEGY_MODES
+    if len(modes) != 1 or modes[0] not in {"long_only", "short_only"}:
+        raise ValueError("research.py supports exactly one sleeve: long_only or short_only")
+    return modes[0] == "short_only"
+
+
 def parameter_sweep(
     pool: BacktestDataset,
     bm_ret: pd.Series,
@@ -168,8 +179,12 @@ def parameter_sweep(
     buffers: tuple[int, ...] = (0, 100, 300, 600, 1000, 1200, 1400),
     costs: tuple[float, ...] = (0.00045,),
     weight_modes: tuple[str, ...] = ("equal",),
+    is_short: bool = False,
+    sbl_enabled: bool = False,
 ) -> pd.DataFrame:
     """Run the configured grid independently on each time split."""
+    if is_short and not sbl_enabled:
+        raise ValueError("Short sweeps require a pool built with explicit short_borrow_sources")
     rows: list[dict] = []
     split_datasets = {name: _slice_dataset(pool, *period) for name, period in splits.items()}
     for split_name, split_pool in split_datasets.items():
@@ -193,7 +208,7 @@ def parameter_sweep(
                 thresh_out_buffer=buffer,
                 frequency=cfg.FREQUENCY,
                 agg_mode=cfg.AGG_MODE,
-                is_short=cfg.IS_SHORT,
+                is_short=is_short,
                 trade_on_next_bar=cfg.trade_on_next_bar_for(cfg.FREQUENCY),
                 strict_first_bar_top_n=cfg.STRICT_FIRST_BAR_TOP_N,
                 close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
@@ -201,6 +216,7 @@ def parameter_sweep(
                 compounding=cfg.COMPOUNDING,
                 weight_mode=weight_mode,
                 max_weight_multiple=cfg.MAX_WEIGHT_MULTIPLE,
+                sbl_enabled=sbl_enabled,
             )
             row = {
                 "split": split_name,
@@ -280,6 +296,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    is_short = _research_is_short()
+    if is_short and not cfg.SHORT_BORROW_SOURCES:
+        raise ValueError("short_only research requires short_borrow_sources")
+
 
     pool = build_pool(
         freq_cfg=cfg.FREQ_CONFIG[cfg.FREQUENCY],
@@ -290,7 +310,8 @@ def main() -> None:
         use_cache=cfg.USE_POOL_CACHE,
         cache_dir=cfg.POOL_CACHE_DIR,
         nosuspend_days=cfg.NOSUSPEND_DAYS,
-        exclude_period=cfg.EXCLUDE_PERIOD,
+        short_borrow_sources=cfg.SHORT_BORROW_SOURCES if is_short else None,
+        borrow_selection=cfg.BORROW_SELECTION,
         prediction_merge_mode=cfg.PREDICTION_MERGE_MODE,
     )
     bm_ret = load_benchmark_returns(
@@ -299,7 +320,7 @@ def main() -> None:
         start=cfg.START,
         end=cfg.END,
     )
-    per_bar, summary = signal_validation(pool, pool_size=cfg.POOL_SIZE, top_n=cfg.PORT_SIZES[0])
+    per_bar, summary = signal_validation(pool, pool_size=cfg.POOL_SIZE, top_n=cfg.PORT_SIZES[0], is_short=is_short)
     per_bar.write_csv(args.output_dir / "signal_validation_per_bar.csv")
     summary.write_csv(args.output_dir / "signal_validation_summary.csv")
 
@@ -310,6 +331,8 @@ def main() -> None:
             bm_ret,
             splits={"tune_2024": ("2024-01-01", "2025-01-01"), "test_2025": ("2025-01-01", "2026-01-01")},
             weight_modes=weight_modes,
+            is_short=is_short,
+            sbl_enabled=is_short,
         )
         if args.sort_sweep_by_return and not sweep.empty and "Ann. Return" in sweep.columns:
             sweep = sweep.sort_values("Ann. Return", ascending=False)

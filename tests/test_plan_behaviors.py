@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pandas as pd
 import polars as pl
 
@@ -17,11 +18,15 @@ from data_loader import (
     _pool_cache_path,
     _prediction_sources,
     _validate_prediction_frames,
+    BacktestDataset,
     load_predictions,
 )
 from market_cache import _parse_args, _refresh_instruments, load_benchmark_returns
-from plotting import plot_position_heatmap
-from research import signal_validation
+from plotting import _ensure_plot_dir, plot_position_heatmap
+from portfolio import generate_portfolio
+from run import compute_returns, run_single_portfolio
+from sbl_loader import load_borrow_availability
+from research import main as research_main, signal_validation
 
 
 class PlanBehaviorTests(unittest.TestCase):
@@ -296,6 +301,204 @@ freq_config:
         self.assertEqual(executable["n_obs"].to_list(), [3, 3])
         self.assertLess(executable["ic"].mean(), 0.0)
 
+    def _short_borrow_pool(self) -> BacktestDataset:
+        bars = pd.to_datetime(["2024-01-04", "2024-01-05", "2024-01-08"])
+        pool_frame = pl.DataFrame({
+            "datetime": bars,
+            "date": [stamp.date() for stamp in bars],
+            "symbol": ["000001.XSHE"] * 3,
+            "turnover": [1.0] * 3,
+            "is_limit_up": [False] * 3,
+            "is_limit_down": [False] * 3,
+            "can_open": [True] * 3,
+            "pred": [1.0] * 3,
+            "borrow_available": [True, False, False],
+            "borrow_rate": [0.365, 0.9, 0.9],
+            "borrow_provider": ["yading"] * 3,
+            "borrow_channel": ["HK"] * 3,
+        })
+        daily_snapshot = pl.DataFrame({
+            "date": [stamp.date() for stamp in bars],
+            "symbol": ["000001.XSHE"] * 3,
+            "log_size": [1.0] * 3,
+            "size_rank": [1] * 3,
+            "industry": ["I"] * 3,
+            "index": ["IDX"] * 3,
+            "listed_Satisfied": [True] * 3,
+            "is_ST": [False] * 3,
+            "normal_days": [100] * 3,
+        })
+        return BacktestDataset(
+            pool_frame=pool_frame,
+            daily_snapshot_frame=daily_snapshot,
+            bars=bars.to_numpy(),
+            symbols=np.asarray(["000001.XSHE"], dtype=object),
+            bar_offsets=np.asarray([0, 1, 2, 3], dtype=np.int64),
+            bar_session_index=np.asarray([0, 1, 2], dtype=np.int32),
+            row_symbol_ids=np.asarray([0, 0, 0], dtype=np.int32),
+            vwap_ret=np.zeros(3),
+            prev_close=np.asarray([0.0, 10.0, 10.0]),
+            bar_close=np.asarray([10.0, 10.0, 10.0]),
+            execution_vwap=np.asarray([10.0, 10.0, 10.0]),
+            pred=np.ones(3),
+            size_rank=np.ones(3, dtype=np.int32),
+            tradable=np.ones(3, dtype=bool),
+            can_open=np.ones(3, dtype=bool),
+            can_open_base=np.ones(3, dtype=bool),
+            can_trade_buy=np.ones(3, dtype=bool),
+            can_trade_sell=np.ones(3, dtype=bool),
+            borrow_available=np.asarray([True, False, False]),
+            borrow_rate=np.asarray([0.365, 0.9, 0.9]),
+        )
+
+    def test_short_borrow_is_locked_and_accrues_across_calendar_days(self) -> None:
+        result = generate_portfolio(
+            self._short_borrow_pool(),
+            port_size=1,
+            thresh_out_buffer=1,
+            size_cut=1,
+            close_on_size_drop=False,
+            trade_on_next_bar=False,
+            is_short=True,
+            plot_heatmap=False,
+            cost_per_turnover=0.0,
+            portfolio_initial_value=100.0,
+        )
+        self.assertEqual(result.held_counts.tolist(), [1, 1, 1])
+        self.assertFalse(result.positions["borrow_available"].iloc[-1])
+        self.assertAlmostEqual(result.positions["locked_borrow_rate"].iloc[-1], 0.365)
+        self.assertGreater(result.borrow_cost.iloc[2], result.borrow_cost.iloc[1] * 2.9)
+
+    def test_unfilled_short_cannot_open_after_an_unavailable_signal(self) -> None:
+        pool = self._short_borrow_pool()
+        pool.borrow_available = np.asarray([True, False, True])
+        result = generate_portfolio(
+            pool,
+            port_size=1,
+            thresh_out_buffer=1,
+            size_cut=1,
+            close_on_size_drop=False,
+            trade_on_next_bar=True,
+            is_short=True,
+            plot_heatmap=False,
+            cost_per_turnover=0.0,
+            portfolio_initial_value=100.0,
+        )
+        self.assertEqual(result.held_counts.tolist(), [0, 0, 0])
+
+    def test_yading_adaptor_selects_minimum_available_rate_across_channels(self) -> None:
+        from openpyxl import Workbook
+
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "yading.xlsx"
+            workbook = Workbook()
+            first = workbook.active
+            first.append(["生效日期", "股票代码", "股票名称", "市场", "利率", "总数"])
+            first.append(["2024-01-04", "000001", "A", "SZ.HK", 0.03, 1])
+            first.append(["2024-01-04", "000001", "A", "SZ.QFII", 0.02, 2])
+            second = workbook.create_sheet("Sheet2")
+            second.append(["2024-01-05", "000001", "A", "SZ.HK", 0.04, 1])
+            workbook.save(path)
+            workbook.close()
+
+            availability = load_borrow_availability(
+                [{"provider": "yading", "adapter": "yading", "path": path}],
+                start="2024-01-04",
+                end="2024-01-05",
+                cache_dir=Path(tmp) / "cache",
+            )
+
+            uncached_dir = Path(tmp) / "uncached"
+            uncached = load_borrow_availability(
+                [{"provider": "yading", "adapter": "yading", "path": path}],
+                start="2024-01-04",
+                end="2024-01-05",
+                cache_dir=uncached_dir,
+                use_cache=False,
+            )
+            self.assertFalse(list(uncached_dir.glob("sbl_normalized_*.parquet")))
+            self.assertEqual(uncached.to_dicts(), availability.to_dicts())
+
+        self.assertEqual(availability.height, 2)
+        first_day = availability.row(0, named=True)
+        self.assertEqual(first_day["borrow_channel"], "QFII")
+        self.assertAlmostEqual(first_day["borrow_rate"], 0.02)
+
+    def test_mode_aware_short_and_combined_returns_do_not_double_subtract_benchmark(self) -> None:
+        index = pd.DatetimeIndex(["2024-01-04"])
+        short_return = pd.Series([0.02], index=index)
+        benchmark = pd.Series([0.01], index=index)
+        turnover = pd.Series([0.0], index=index)
+
+        short_only, _ = compute_returns(
+            short_return, turnover, turnover, benchmark, strategy_mode="short_only"
+        )
+        long_short, _ = compute_returns(
+            short_return, turnover, turnover, benchmark, strategy_mode="long_short"
+        )
+        self.assertAlmostEqual(short_only.iloc[0], 0.03)
+        self.assertAlmostEqual(long_short.iloc[0], 0.02)
+
+    def test_missing_benchmark_return_requires_explicit_policy(self) -> None:
+        index = pd.DatetimeIndex(["2024-01-04", "2024-01-05"])
+        portfolio_returns = pd.Series([0.02, 0.01], index=index)
+        turnover = pd.Series([0.0, 0.0], index=index)
+        benchmark = pd.Series([0.01], index=index[:1])
+
+        with self.assertRaisesRegex(ValueError, "Benchmark returns are missing"):
+            compute_returns(portfolio_returns, turnover, turnover, benchmark)
+
+        excess, _ = compute_returns(
+            portfolio_returns,
+            turnover,
+            turnover,
+            benchmark,
+            benchmark_missing_return_policy="zero",
+        )
+        self.assertEqual(excess.tolist(), [0.01, 0.01])
+
+    def test_short_single_runner_requires_explicit_sbl_setup(self) -> None:
+        with self.assertRaisesRegex(ValueError, "short_borrow_sources"):
+            run_single_portfolio(
+                None,
+                pd.Series(dtype=float),
+                port_size=1,
+                pool_size=1,
+                thresh_out_buffer=0,
+                frequency="daily",
+                agg_mode="simple",
+                is_short=True,
+                trade_on_next_bar=False,
+                strict_first_bar_top_n=False,
+                close_on_size_drop=False,
+                cost_per_turnover=0.0,
+                compounding=False,
+            )
+
+    def test_long_short_plots_use_a_distinct_directory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = _ensure_plot_dir(tmp, strategy_mode="long_short")
+        self.assertEqual(Path(path).name, "plots_long_short")
+
+    def test_research_short_mode_builds_an_sbl_pool_and_marks_the_sweep(self) -> None:
+        sources = [{"provider": "yading", "adapter": "yading", "path": Path("/tmp/yading.xlsx")}]
+        with (
+            TemporaryDirectory() as tmp,
+            patch.object(sys, "argv", ["research.py", "--output-dir", tmp]),
+            patch("research.cfg.STRATEGY_MODES", ("short_only",)),
+            patch("research.cfg.SHORT_BORROW_SOURCES", sources),
+            patch("research.build_pool", return_value=SimpleNamespace()) as build_pool,
+            patch("research.load_benchmark_returns", return_value=pd.Series(dtype=float)),
+            patch("research.signal_validation", return_value=(pl.DataFrame(), pl.DataFrame())),
+            patch("research.parameter_sweep", return_value=pd.DataFrame()) as sweep,
+        ):
+            research_main()
+
+        build_kwargs = build_pool.call_args.kwargs
+        self.assertEqual(build_kwargs["short_borrow_sources"], sources)
+        self.assertNotIn("exclude_period", build_kwargs)
+        self.assertTrue(sweep.call_args.kwargs["is_short"])
+        self.assertTrue(sweep.call_args.kwargs["sbl_enabled"])
 
 if __name__ == "__main__":
     unittest.main()
