@@ -179,6 +179,8 @@ locally installed and authenticated `rqdatac` package (and optionally
 | `pool_size` | Maximum eligible size rank for the candidate pool. |
 | `port_sizes` | List of actual portfolio sizes to simulate. |
 | `thresh_out_buffer` | A held target may remain until rank exceeds `port_size + thresh_out_buffer`. |
+| `short_port_size` | Optional short-sleeve name count; `null` uses the paired `port_sizes` entry. |
+| `short_exit_rank` | Optional direct short-sleeve exit rank; `null` uses `short_port_size + thresh_out_buffer` and it must be at least `short_port_size`. |
 | `strategy_modes` | Explicit ordered list of `long_only`, `short_only`, and/or `long_short`. |
 | `short_borrow_sources` | Explicit SBL source mappings with `provider`, `adapter`, and run-directory-relative `path`; required by short modes. |
 | `borrow_selection` | Available-borrow selection policy; currently `min_available_rate`. |

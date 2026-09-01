@@ -24,7 +24,7 @@ from data_loader import (
 from market_cache import _parse_args, _refresh_instruments, load_benchmark_returns
 from plotting import _ensure_plot_dir, plot_position_heatmap
 from portfolio import generate_portfolio
-from run import compute_returns, run_single_portfolio
+from run import _short_sleeve_parameters, compute_returns, run_single_portfolio
 from sbl_loader import load_borrow_availability
 from research import main as research_main, signal_validation
 
@@ -64,6 +64,8 @@ frequency: daily
 market_cache_dir: market_cache
 benchmark_symbol: 000852
 pool_cache_dir: cache
+short_port_size: 200
+short_exit_rank: 300
 freq_config:
   daily:
     market_data: market.parquet
@@ -92,7 +94,13 @@ freq_config:
             self.assertEqual(module.POOL_CACHE_DIR, run_dir / "cache")
             self.assertEqual(module.FREQ_CONFIG["daily"]["market_data"], run_dir / "market.parquet")
             self.assertEqual(module.FREQ_CONFIG["daily"]["preds_dir"], run_dir / "predictions")
+            self.assertEqual(module.SHORT_PORT_SIZE, 200)
+            self.assertEqual(module.SHORT_EXIT_RANK, 300)
             self.assertEqual(module.OUTPUT_DIR, run_dir / "output_long_4400_daily")
+
+    def test_short_sleeve_parameters_apply_independent_size_and_exit_rank(self) -> None:
+        with patch("run.cfg.SHORT_PORT_SIZE", 200), patch("run.cfg.SHORT_EXIT_RANK", 300):
+            self.assertEqual(_short_sleeve_parameters(800), (200, 100))
 
     def test_market_cache_loads_manifest_mapped_benchmarks(self) -> None:
         with TemporaryDirectory() as tmp:

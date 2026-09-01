@@ -70,6 +70,8 @@ _DEFAULTS: dict = {
     "pool_size": 4400,
     "port_sizes": [800],
     "thresh_out_buffer": 600,
+    "short_port_size": None,
+    "short_exit_rank": None,
     "trade_on_next_bar": False,
     "strict_first_bar_top_n": False,
     "close_on_size_drop": False,
@@ -184,6 +186,14 @@ def _benchmark_missing_return_policy(raw: object) -> str:
         raise ValueError("benchmark_missing_return_policy must be 'error' or 'zero'")
     return str(raw)
 
+def _optional_positive_int(raw: object, key: str) -> int | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
+        raise ValueError(f"{key} must be a positive integer or null")
+    return raw
+
+
 
 
 
@@ -214,6 +224,10 @@ BENCHMARK_MISSING_RETURN_POLICY: str = _benchmark_missing_return_policy(_cfg["be
 PREDICTION_MERGE_MODE: str = _cfg["prediction_merge_mode"]
 
 # ── Universe and strategy ─────────────────────────────────────────────────────
+SHORT_PORT_SIZE: int | None = _optional_positive_int(_cfg["short_port_size"], "short_port_size")
+SHORT_EXIT_RANK: int | None = _optional_positive_int(_cfg["short_exit_rank"], "short_exit_rank")
+if SHORT_PORT_SIZE is not None and SHORT_EXIT_RANK is not None and SHORT_EXIT_RANK < SHORT_PORT_SIZE:
+    raise ValueError("short_exit_rank must be greater than or equal to short_port_size")
 UNIVERSE: list[str] | None = _cfg["universe"]
 IS_SHORT: bool = _cfg["is_short"]
 ALLOW_ST_OPEN: bool = _cfg["allow_st_open"]

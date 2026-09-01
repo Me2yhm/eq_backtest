@@ -420,6 +420,14 @@ def _log_holding_stats(stats: dict, port_size: int) -> None:
 
 
 
+def _short_sleeve_parameters(port_size: int) -> tuple[int, int]:
+    short_port_size = cfg.SHORT_PORT_SIZE or port_size
+    short_exit_rank = cfg.SHORT_EXIT_RANK or short_port_size + cfg.THRESH_OUT_BUFFER
+    if short_exit_rank < short_port_size:
+        raise ValueError("short_exit_rank must be greater than or equal to the short portfolio size")
+    return short_port_size, short_exit_rank - short_port_size
+
+
 def _mode_result(
     pool,
     mode: str,
@@ -429,8 +437,6 @@ def _mode_result(
 ) -> PortfolioResult:
     common = {
         "pool": pool,
-        "port_size": port_size,
-        "thresh_out_buffer": cfg.THRESH_OUT_BUFFER,
         "size_cut": cfg.POOL_SIZE,
         "close_on_size_drop": cfg.CLOSE_ON_SIZE_DROP,
         "trade_on_next_bar": cfg.trade_on_next_bar_for(cfg.FREQUENCY),
@@ -446,12 +452,23 @@ def _mode_result(
         "weight_mode": cfg.WEIGHT_MODE,
         "max_weight_multiple": cfg.MAX_WEIGHT_MULTIPLE,
     }
+    long_common = {
+        **common,
+        "port_size": port_size,
+        "thresh_out_buffer": cfg.THRESH_OUT_BUFFER,
+    }
     if mode == "long_only":
-        return _with_sleeve(generate_portfolio(is_short=False, **common), "long")
-    short_result = _with_sleeve(generate_portfolio(is_short=True, **common), "short")
+        return _with_sleeve(generate_portfolio(is_short=False, **long_common), "long")
+    short_port_size, short_thresh_out_buffer = _short_sleeve_parameters(port_size)
+    short_common = {
+        **common,
+        "port_size": short_port_size,
+        "thresh_out_buffer": short_thresh_out_buffer,
+    }
+    short_result = _with_sleeve(generate_portfolio(is_short=True, **short_common), "short")
     if mode == "short_only":
         return short_result
-    long_result = _with_sleeve(generate_portfolio(is_short=False, **common), "long")
+    long_result = _with_sleeve(generate_portfolio(is_short=False, **long_common), "long")
     return _combine_sleeves(long_result, short_result)
 
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 image_tag="${EQ_BACKTEST_IMAGE:-eq-backtest:local}"
-default_run_dir="$repo_dir/runs/daily_v6_production"
+default_run_dir="/runs/daily_v5_long_short"
 
 if (($# > 1)); then
   echo "Usage: $0 [run-directory]" >&2
