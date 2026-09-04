@@ -98,9 +98,9 @@ freq_config:
             self.assertEqual(module.SHORT_EXIT_RANK, 300)
             self.assertEqual(module.OUTPUT_DIR, run_dir / "output_long_4400_daily")
 
-    def test_short_sleeve_parameters_apply_independent_size_and_exit_rank(self) -> None:
+    def test_short_sleeve_parameters_use_independent_size_without_exit_buffer(self) -> None:
         with patch("run.cfg.SHORT_PORT_SIZE", 200), patch("run.cfg.SHORT_EXIT_RANK", 300):
-            self.assertEqual(_short_sleeve_parameters(800), (200, 100))
+            self.assertEqual(_short_sleeve_parameters(800), (200, 0))
 
     def test_market_cache_loads_manifest_mapped_benchmarks(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -393,6 +393,96 @@ freq_config:
             portfolio_initial_value=100.0,
         )
         self.assertEqual(result.held_counts.tolist(), [0, 0, 0])
+
+    def test_short_rank_pool_unites_available_and_held_names(self) -> None:
+        bars = pd.to_datetime(["2024-01-04", "2024-01-05", "2024-01-08"])
+        symbols = ["UNAVAILABLE", "GOOD", "BAD", "OPEN", "BLOCKED"]
+        availability = [
+            [False, True, True, True, True],
+            [False, True, True, True, True],
+            [False, True, True, True, False],
+        ]
+        predictions = [
+            [-100.0, -10.0, -9.0, -5.0, -4.0],
+            [-100.0, -10.0, -9.0, -30.0, -20.0],
+            [-100.0, -10.0, -9.0, -30.0, -20.0],
+        ]
+        rows = [
+            {
+                "datetime": bar,
+                "date": bar.date(),
+                "symbol": symbol,
+                "turnover": 1.0,
+                "is_limit_up": False,
+                "is_limit_down": False,
+                "can_open": True,
+                "pred": predictions[bar_index][symbol_index],
+                "borrow_available": availability[bar_index][symbol_index],
+                "borrow_rate": 0.0,
+                "borrow_provider": "yading",
+                "borrow_channel": "HK",
+            }
+            for bar_index, bar in enumerate(bars)
+            for symbol_index, symbol in enumerate(symbols)
+        ]
+        daily_snapshot = pl.DataFrame([
+            {
+                "date": bar.date(),
+                "symbol": symbol,
+                "log_size": 1.0,
+                "size_rank": 1,
+                "industry": "I",
+                "index": "IDX",
+                "listed_Satisfied": True,
+                "is_ST": False,
+                "normal_days": 100,
+            }
+            for bar in bars
+            for symbol in symbols
+        ])
+        pool = BacktestDataset(
+            pool_frame=pl.DataFrame(rows),
+            daily_snapshot_frame=daily_snapshot,
+            bars=bars.to_numpy(),
+            symbols=np.asarray(symbols, dtype=object),
+            bar_offsets=np.asarray([0, 5, 10, 15], dtype=np.int64),
+            bar_session_index=np.arange(len(bars), dtype=np.int32),
+            row_symbol_ids=np.tile(np.arange(len(symbols), dtype=np.int32), len(bars)),
+            vwap_ret=np.zeros(len(rows)),
+            prev_close=np.full(len(rows), 10.0),
+            bar_close=np.full(len(rows), 10.0),
+            execution_vwap=np.full(len(rows), 10.0),
+            pred=np.asarray(predictions).ravel(),
+            size_rank=np.ones(len(rows), dtype=np.int32),
+            tradable=np.ones(len(rows), dtype=bool),
+            can_open=np.ones(len(rows), dtype=bool),
+            can_open_base=np.ones(len(rows), dtype=bool),
+            can_trade_buy=np.ones(len(rows), dtype=bool),
+            can_trade_sell=np.ones(len(rows), dtype=bool),
+            borrow_available=np.asarray(availability, dtype=bool).ravel(),
+            borrow_rate=np.zeros(len(rows)),
+        )
+
+        result = generate_portfolio(
+            pool,
+            port_size=2,
+            thresh_out_buffer=2,
+            size_cut=1,
+            close_on_size_drop=False,
+            trade_on_next_bar=True,
+            is_short=True,
+            plot_heatmap=False,
+            cost_per_turnover=0.0,
+            portfolio_initial_value=100.0,
+        )
+
+        # UNAVAILABLE has a lower score but does not consume a rank. OPEN and
+        # BLOCKED are signal targets, but BLOCKED cannot open on execution.
+        # The one qualified opening permits one cover: BAD (rank 4) exits
+        # before GOOD (rank 3), preserving the two-name short sleeve.
+        self.assertEqual(result.positions.xs(bars[1], level="date").index.tolist(), ["BAD", "GOOD"])
+        self.assertEqual(result.positions.xs(bars[2], level="date").index.tolist(), ["GOOD", "OPEN"])
+        self.assertEqual(result.held_counts.tolist(), [0, 2, 2])
 
     def test_yading_adaptor_selects_minimum_available_rate_across_channels(self) -> None:
         from openpyxl import Workbook

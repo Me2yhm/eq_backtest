@@ -206,6 +206,7 @@ def _simulate_portfolio_core(
     sell_keys = np.empty(n_symbols, dtype=np.float64)
     buy_candidates = np.full(n_symbols, -1, dtype=np.int32)
     buy_keys = np.empty(n_symbols, dtype=np.float64)
+    rank_candidates = np.full(n_symbols, -1, dtype=np.int32)
 
     curr_weights = np.zeros(n_symbols, dtype=np.float64)
     prev_symbols = np.full(n_symbols, -1, dtype=np.int32)
@@ -365,7 +366,7 @@ def _simulate_portfolio_core(
             for signal_row_idx in range(signal_start, signal_end):
                 signal_row_by_symbol[row_symbol_ids[signal_row_idx]] = signal_row_idx
 
-            rank = 0
+            rank_candidate_count = 0
             order_start = sorted_offsets[signal_bar_idx]
             order_end = sorted_offsets[signal_bar_idx + 1]
             has_ranked_signal = order_end > order_start
@@ -384,6 +385,10 @@ def _simulate_portfolio_core(
                         debug_has_signal_row = 1
 
                     in_size_pool = size_rank[signal_row_idx] <= size_cut
+                    # Filter the prediction-sorted stream before assigning
+                    # ranks. A short rank pool contains borrow-available names
+                    # and already-held shorts; unavailable non-held names do
+                    # not consume a rank.
                     signal_borrowable = (not is_short) or borrow_available[signal_row_idx] or held[symbol_id]
                     if in_size_pool and signal_borrowable:
                         signal_in_size_pool[symbol_id] = True
@@ -391,13 +396,21 @@ def _simulate_portfolio_core(
                             debug_can_open_base = 1
                             debug_in_size_pool = 1
 
-                    # External eligible rank uses ideal entry holdings, not the
-                    # actual execution state.
-                    if signal_in_size_pool[symbol_id] or (target[symbol_id] and ((not is_short) or held[symbol_id])):
-                        rank += 1
-                        rank_by_symbol[symbol_id] = rank
-                        if debug_this_bar and symbol_id == debug_target_symbol_id:
-                            debug_signal_rank = rank
+                    rank_candidate_eligible = (
+                        signal_in_size_pool[symbol_id]
+                        or (target[symbol_id] and ((not is_short) or held[symbol_id]))
+                    )
+                    if rank_candidate_eligible:
+                        rank_candidates[rank_candidate_count] = symbol_id
+                        rank_candidate_count += 1
+
+                rank = 0
+                for rank_position in range(rank_candidate_count):
+                    symbol_id = rank_candidates[rank_position]
+                    rank += 1
+                    rank_by_symbol[symbol_id] = rank
+                    if debug_this_bar and symbol_id == debug_target_symbol_id:
+                        debug_signal_rank = rank
 
         n_closed = 0
         if has_signal and has_ranked_signal:
@@ -414,7 +427,12 @@ def _simulate_portfolio_core(
                 symbol_id = target_symbols[i]
                 exec_row_idx = current_row[symbol_id]
                 target_valid_listed = exec_row_idx != -1 and can_open_base[exec_row_idx]
-                target_rank_rule = rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > thresh_out
+                # Short turnover is governed by the actual top-N opening
+                # frontier. Long sleeves retain their configured exit buffer.
+                target_exit_rank = port_size if is_short else thresh_out
+                target_rank_rule = (
+                    rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > target_exit_rank
+                )
                 target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
                 if target_rank_rule or target_size_rule or not target_valid_listed:
                     target[symbol_id] = False
@@ -488,6 +506,20 @@ def _simulate_portfolio_core(
 
             # 2) Actual sell layer: sell current > target by external priority:
             # target_weight asc, reduction desc, stock_idx asc.
+            # For short books, qualify fresh target entries on the execution
+            # bar before covering. Full covers are capped so qualified entries
+            # can keep the actual sleeve at port_size.
+            qualified_short_open_count = 0
+            if is_short:
+                for i in range(target_count):
+                    symbol_id = target_symbols[i]
+                    row_idx = current_row[symbol_id]
+                    if current_weights[symbol_id] <= eps and row_idx != -1 and can_open[row_idx]:
+                        qualified_short_open_count += 1
+                short_full_close_budget = held_count + qualified_short_open_count - port_size
+                if short_full_close_budget < 0:
+                    short_full_close_budget = 0
+
             sell_count = 0
             for i in range(held_count):
                 symbol_id = held_symbols[i]
@@ -497,9 +529,15 @@ def _simulate_portfolio_core(
                 tgt_w = target_weight_by_symbol[symbol_id] if target[symbol_id] else 0.0
                 reduction = cur_w - tgt_w
                 if reduction > eps:
-                    target_group = 1.0 if target[symbol_id] else 0.0
                     sell_candidates[sell_count] = symbol_id
-                    sell_keys[sell_count] = target_group * 10.0 - reduction + symbol_id * 1e-12
+                    if is_short and tgt_w <= eps:
+                        reverse_rank = rank_by_symbol[symbol_id]
+                        if reverse_rank <= 0:
+                            reverse_rank = n_symbols + 1
+                        sell_keys[sell_count] = -float(reverse_rank) + symbol_id * 1e-12
+                    else:
+                        target_group = 1.0 if target[symbol_id] else 0.0
+                        sell_keys[sell_count] = target_group * 10.0 - reduction + symbol_id * 1e-12
                     sell_count += 1
 
             if sell_count > 0:
@@ -529,6 +567,14 @@ def _simulate_portfolio_core(
                             debug_close_reason = 302
                         continue
 
+                    full_short_exit = tgt_w <= eps
+                    if is_short and full_short_exit and (
+                        short_full_close_budget <= 0
+                        or sellable < cur_w - eps
+                        or remaining_sell_budget < cur_w - eps
+                    ):
+                        continue
+
                     sell_w = reduction
                     if sell_w > sellable:
                         sell_w = sellable
@@ -545,6 +591,8 @@ def _simulate_portfolio_core(
                         frozen_weights[symbol_id] = 0.0
                         held[symbol_id] = False
                         n_closed += 1
+                        if is_short and full_short_exit:
+                            short_full_close_budget -= 1
                     if debug_this_bar and symbol_id == debug_target_symbol_id and debug_close_reason < 0:
                         debug_close_reason = 305
 
@@ -569,7 +617,12 @@ def _simulate_portfolio_core(
                 deficit = target_weight_by_symbol[symbol_id] - current_weights[symbol_id]
                 if deficit > eps:
                     buy_candidates[buy_count] = symbol_id
-                    buy_keys[buy_count] = (pred[row_idx] if is_short else -pred[row_idx]) + symbol_id * 1e-12
+                    if is_short:
+                        fresh_short_open = current_weights[symbol_id] <= eps
+                        opening_priority = 0.0 if fresh_short_open else float(n_symbols)
+                        buy_keys[buy_count] = opening_priority + rank_by_symbol[symbol_id] + symbol_id * 1e-12
+                    else:
+                        buy_keys[buy_count] = -pred[row_idx] + symbol_id * 1e-12
                     buy_count += 1
 
             if debug_this_bar:

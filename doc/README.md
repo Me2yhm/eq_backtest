@@ -180,7 +180,7 @@ locally installed and authenticated `rqdatac` package (and optionally
 | `port_sizes` | List of actual portfolio sizes to simulate. |
 | `thresh_out_buffer` | A held target may remain until rank exceeds `port_size + thresh_out_buffer`. |
 | `short_port_size` | Optional short-sleeve name count; `null` uses the paired `port_sizes` entry. |
-| `short_exit_rank` | Optional direct short-sleeve exit rank; `null` uses `short_port_size + thresh_out_buffer` and it must be at least `short_port_size`. |
+| `short_exit_rank` | Deprecated compatibility setting. Short sleeves always rebalance against the `short_port_size` rank frontier. |
 | `strategy_modes` | Explicit ordered list of `long_only`, `short_only`, and/or `long_short`. |
 | `short_borrow_sources` | Explicit SBL source mappings with `provider`, `adapter`, and run-directory-relative `path`; required by short modes. |
 | `borrow_selection` | Available-borrow selection policy; currently `min_available_rate`. |
@@ -224,6 +224,9 @@ rate is selected; ties use configured source order, channel, then source row.
 Quantity establishes availability only and does not size the equal-weight book.
 
 Fresh short sales require availability on both the signal and execution dates.
+Before covering an existing short, the simulator qualifies replacement short
+sales and limits full covers to retain the configured short-sleeve count.
+Those full covers are taken from the worst-ranked current short positions first.
 An opened short remains eligible to hold or cover after later list disappearance;
 its selected borrow rate is locked (with share-weighted blending for later
 increases). Fees are deducted in the short simulator once at each calendar-day

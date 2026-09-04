@@ -422,10 +422,9 @@ def _log_holding_stats(stats: dict, port_size: int) -> None:
 
 def _short_sleeve_parameters(port_size: int) -> tuple[int, int]:
     short_port_size = cfg.SHORT_PORT_SIZE or port_size
-    short_exit_rank = cfg.SHORT_EXIT_RANK or short_port_size + cfg.THRESH_OUT_BUFFER
-    if short_exit_rank < short_port_size:
-        raise ValueError("short_exit_rank must be greater than or equal to the short portfolio size")
-    return short_port_size, short_exit_rank - short_port_size
+    # Short entries use the top short_port_size ranks and matched reverse-rank
+    # covers. Keep no exit buffer in the actual short rebalancing path.
+    return short_port_size, 0
 
 
 def _mode_result(
