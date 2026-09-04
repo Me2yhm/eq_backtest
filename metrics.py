@@ -68,22 +68,47 @@ def portfolio_metrics(daily_returns: pd.Series, risk_free_rate: float = 0.0, com
 
 def holding_period_stats(positions: pd.DataFrame) -> dict:
     """
-    Compute daily holding-period statistics over the portfolio's lifetime.
+    Compute holding-period statistics in trading-session units.
+
+    Intraday inputs are sampled at the final bar of each trading day. Positions
+    must be ordered by timestamp and then symbol. A trading day without any
+    position rows has no snapshot, so ``avg_closed`` cannot record exits on it.
 
     Returns
     -------
     dict of pd.Series indexed by date:
-        avg_open    – average days held for currently open positions
-        median_open – median days held for currently open positions
+        avg_open    – average trading sessions held for currently open positions
+        median_open – median trading sessions held for currently open positions
         max_open    – longest currently held position
-        avg_closed  – average days held for positions closed on that day
+        avg_closed  – average trading-session duration for recorded exits
     """
     idx = positions.index
-    dates = idx.get_level_values("date").to_numpy()
+    timestamps = pd.DatetimeIndex(pd.to_datetime(idx.get_level_values("date")))
     symbols = idx.get_level_values("symbol").to_numpy(dtype=object)
     if "sleeve" in positions.columns:
         sleeves = positions["sleeve"].to_numpy(dtype=object)
         symbols = np.char.add(np.char.add(sleeves.astype(str), ":"), symbols.astype(str)).astype(object)
+
+    # Intraday positions are snapshots at every bar. Holding-period statistics
+    # are reported in trading-session units, so use the final bar of each day
+    # rather than treating each 5-minute snapshot as a separate day.
+    session_dates = timestamps.normalize()
+    if len(timestamps) and not timestamps.equals(session_dates):
+        session_date_values = session_dates.to_numpy()
+        session_ends = np.append(
+            np.flatnonzero(session_date_values[:-1] != session_date_values[1:]) + 1,
+            len(session_date_values),
+        )
+        timestamp_values = timestamps.to_numpy()
+        # The chronological input lets searchsorted find the first row of each
+        # day’s final timestamp, retaining all symbols in that final bar.
+        final_bar_starts = np.searchsorted(timestamp_values, timestamp_values[session_ends - 1], side="left")
+        final_bar_indices = np.concatenate([
+            np.arange(start, end) for start, end in zip(final_bar_starts, session_ends, strict=True)
+        ])
+        session_dates = session_dates[final_bar_indices]
+        symbols = symbols[final_bar_indices]
+    dates = session_dates.to_numpy()
 
     if len(dates) == 0:
         empty = pd.Series(dtype=float)

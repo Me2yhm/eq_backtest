@@ -22,6 +22,7 @@ from data_loader import (
     load_predictions,
 )
 from market_cache import _parse_args, _refresh_instruments, load_benchmark_returns
+from metrics import holding_period_stats
 from plotting import _ensure_plot_dir, plot_position_heatmap
 from portfolio import generate_portfolio
 from run import _short_sleeve_parameters, compute_returns, run_single_portfolio
@@ -286,6 +287,106 @@ freq_config:
 
             with self.assertRaisesRegex(ValueError, "overlap"):
                 load_predictions(freq_cfg, "2024-01-01", "2024-01-03")
+
+    def test_5min_checkpoint_sources_select_only_the_named_epoch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            preds_dir = Path(tmp)
+            selected = [
+                ("2024", "2024-01-02 09:31:00", "2024-12-31"),
+                ("2025", "2025-01-02 09:31:00", "2025-12-31"),
+                ("2026", "2026-01-05 09:31:00", "2026-04-20"),
+            ]
+            configured_sources = []
+            for index, (year, timestamp, end) in enumerate(selected, start=1):
+                selected_path = preds_dir / f"predictions_epoch_15_{year}.parquet"
+                decoy_path = preds_dir / f"predictions_epoch_14_{year}.parquet"
+                pl.DataFrame({
+                    "datetime": [timestamp],
+                    "symbol": ["000001.XSHE"],
+                    "prediction": [float(index)],
+                    "label": [0.0],
+                }).write_parquet(selected_path)
+                pl.DataFrame({
+                    "datetime": [timestamp],
+                    "symbol": ["000001.XSHE"],
+                    "prediction": [99.0],
+                    "label": [0.0],
+                }).write_parquet(decoy_path)
+                configured_sources.append({
+                    "file": selected_path.name,
+                    "start": timestamp[:10],
+                    "end": end,
+                })
+
+            freq_cfg = {
+                "market_data": "5min_market.parquet",
+                "preds_dir": str(preds_dir),
+                "horizons": [""],
+                "prediction_sources": configured_sources,
+            }
+            sources = _prediction_sources(freq_cfg)
+            result = load_predictions(freq_cfg, "2024-01-02", "2026-04-20", sources=sources)
+
+            self.assertEqual(
+                [source.path.name for source in sources],
+                [f"predictions_epoch_15_{year}.parquet" for year, _, _ in selected],
+            )
+            self.assertEqual(
+                [(source.start, source.end) for source in sources],
+                [(timestamp[:10], end) for _, timestamp, end in selected],
+            )
+            self.assertEqual(result.columns, ["datetime", "symbol", "pred"])
+            self.assertEqual(result["pred"].to_list(), [1.0, 2.0, 3.0])
+
+    def test_5min_run_config_resolves_same_bar_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp).resolve()
+            (run_dir / "config.yml").write_text(
+                """
+frequency: 5min
+freq_config:
+  5min:
+    market_data: market_5min.parquet
+    preds_dir: predictions
+    trade_on_next_bar: false
+""".lstrip(),
+                encoding="utf-8",
+            )
+            module_name = "_isolated_5min_run_config_test"
+            spec = importlib.util.spec_from_file_location(module_name, Path(__file__).parents[1] / "config.py")
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            try:
+                with patch.dict(os.environ, {"EQ_BACKTEST_RUN_DIR": str(run_dir)}):
+                    spec.loader.exec_module(module)
+            finally:
+                sys.modules.pop(module_name, None)
+
+            self.assertFalse(module.FREQ_CONFIG["5min"]["trade_on_next_bar"])
+            self.assertFalse(module.trade_on_next_bar_for("5min"))
+
+    def test_intraday_holding_period_stats_use_end_of_day_snapshots(self) -> None:
+        index = pd.MultiIndex.from_tuples(
+            [
+                (pd.Timestamp("2024-01-02 09:31"), "A"),
+                (pd.Timestamp("2024-01-02 09:36"), "A"),
+                (pd.Timestamp("2024-01-02 09:36"), "B"),
+                (pd.Timestamp("2024-01-03 09:31"), "A"),
+                (pd.Timestamp("2024-01-03 09:31"), "B"),
+                (pd.Timestamp("2024-01-03 09:36"), "B"),
+            ],
+            names=["date", "symbol"],
+        )
+
+        stats = holding_period_stats(pd.DataFrame(index=index))
+
+        self.assertEqual(stats["avg_open"].to_dict(), {
+            pd.Timestamp("2024-01-02"): 1.0,
+            pd.Timestamp("2024-01-03"): 2.0,
+        })
+        self.assertEqual(stats["avg_closed"].to_dict(), {pd.Timestamp("2024-01-03"): 1.0})
 
     def test_signal_validation_uses_same_timestamp_and_three_layers(self) -> None:
         rows = []

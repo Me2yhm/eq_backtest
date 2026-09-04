@@ -410,9 +410,9 @@ def run_single_portfolio(
 def _log_holding_stats(stats: dict, port_size: int) -> None:
     avg_open = stats["avg_open"]
     avg_closed = stats["avg_closed"]
-    logger.info("Holding (open):   avg {:.1f} d, median {:.1f} d", avg_open.mean(), avg_open.median())
+    logger.info("Holding (open):   avg {:.1f} sessions, median {:.1f} sessions", avg_open.mean(), avg_open.median())
     if not avg_closed.empty:
-        logger.info("Holding (closed): avg {:.1f} d", avg_closed.mean())
+        logger.info("Holding (closed): avg {:.1f} sessions", avg_closed.mean())
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────

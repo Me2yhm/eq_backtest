@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned. A dedicated configuration has been added at
+Implemented. A dedicated configuration has been added at
 `runs/5min_open_1d_long-only/config.yml`; this plan intentionally keeps the
 first intraday run close to the established daily long-only pattern.
 
@@ -42,21 +42,21 @@ epochs, discover every parquet in the directory, or use `mean` merging.
 The 5-minute execution convention is explicit:
 
 ```text
-signal on completed bar t -> size shares at t close
--> execute those shares at bar t+1 VWAP5 -> mark at bar t+1 close
+prediction at bar t -> construct target at t
+-> execute and convert shares at bar t VWAP5 -> mark at bar t close
 ```
 
-This is the intraday equivalent of the daily run's separated signal and
-execution timing. With next-bar execution, the share count uses the signal
-bar's close rather than the execution bar's VWAP5; target weights are therefore
-prior-close sizing instructions, not exact VWAP5 notional weights. VWAP5 is the
-intermediate marking point for the previous-close-to-VWAP5 and VWAP5-to-close
-P&L legs.
+Prediction and market data have exactly aligned `datetime` keys. A prediction
+at timestamp `t` is traded against the market data at the same timestamp; no
+prior- or next-bar shift is applied.
 
-The immediately preceding bar supplies the signal even across a session
-boundary: the first 5-minute bar of a trading day uses the final bar of the
-previous trading day. T+1 remains calendar-day based: an intraday purchase
-cannot be sold until the first bar of the following trading day.
+For same-bar execution, the share count is target weight times post-cost
+portfolio value divided by execution VWAP5. Target weights therefore map to
+execution-VWAP5 notionals. VWAP5 is the intermediate marking point for the
+previous-close-to-VWAP5 and VWAP5-to-close P&L legs.
+
+T+1 remains calendar-day based: an intraday purchase cannot be sold until the
+first bar of the following trading day.
 
 ## Necessary adjustments
 
@@ -64,7 +64,7 @@ cannot be sold until the first bar of the following trading day.
 
 Use `runs/5min_open_1d_long-only/config.yml` rather than the generic 5-minute
 defaults. It pins the cached market paths, daily rules, benchmark cache,
-long-only mode, VWAP5/close columns, simple daily aggregation, and next-bar
+long-only mode, VWAP5/close columns, simple daily aggregation, and same-timestamp
 execution. It also sets exact prediction source files, which avoids the
 overlapping checkpoint files in the prediction directory.
 
@@ -72,7 +72,7 @@ No new public configuration key is necessary: the existing
 `prediction_sources` contract already makes checkpoint selection explicit and
 includes the selected source signatures in the pool-cache identity.
 
-### 2. Reuse the existing intraday path unchanged
+### 2. Reuse the existing intraday portfolio path
 
 No portfolio-core change is planned for the simple run. The existing pipeline
 already:
@@ -90,17 +90,34 @@ already:
 Keeping this common path avoids diverging from the daily backtest's portfolio,
 cost, benchmark, and arithmetic-reporting conventions.
 
-### 3. Add only two focused regression tests
+### 3. Report holding periods from end-of-day intraday snapshots
 
-Keep the loader and configuration contracts independently testable:
+The position file has one snapshot per 5-minute bar, while holding-period
+statistics are expressed in trading-session units. Compute those statistics
+from each trading day's final position snapshot so a two-day run cannot report
+a 24-bar holding period as 24 trading sessions. This changes reporting only;
+it does not change positions, trades, returns, or portfolio state.
 
-1. Add a loader test with three disjoint files for one selected checkpoint and
+A trading day with no held positions has no position snapshot. As in the
+existing daily report, `avg_closed` cannot record exits on such a day; a later
+nonempty snapshot may attribute them to its date. Correcting this would require
+a complete trading-date timeline independent of positions and is outside this
+simple run.
+
+### 4. Add only focused regression tests
+
+Implemented to keep the loader and configuration contracts independently
+testable:
+
+1. A loader test with three disjoint files for one selected checkpoint and
    decoy files from another. It must prove that the explicit
    `prediction_sources` load only the selected checkpoint and preserve source
    ordering and date bounds.
-2. Add a run-configuration resolution test following the existing dedicated
+2. A run-configuration resolution test following the existing dedicated
    run-directory pattern. It must assert that the 5-minute configuration
-   resolves `trade_on_next_bar_for("5min")` to `True`.
+   resolves `trade_on_next_bar_for("5min")` to `False`.
+3. An intraday holding-period test that verifies final-bar-of-day sampling and
+   trading-session durations.
 
 Do not add a model-quality or missing-data test in this phase.
 
@@ -138,10 +155,10 @@ not change portfolio semantics opportunistically to reduce memory use.
 
 - The selected three prediction files are the only prediction inputs.
 - The pool is built from the cached 5-minute and daily market paths.
-- Signal bar and execution bar differ by exactly one 5-minute bar, including
-  from the previous trading day's final bar to the next day's first bar.
+- Prediction and execution market data use the same five-minute timestamp;
+  no bar shift is applied.
 - Daily eligibility/limit/T+1 constraints continue to match the common engine.
 - Results are isolated in the new run directory and do not overwrite daily
   outputs.
-- The existing regression suite and both focused checkpoint/configuration tests
-  pass.
+- The existing regression suite and focused checkpoint, configuration, and
+  intraday holding-period tests pass.
