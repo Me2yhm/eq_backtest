@@ -145,6 +145,13 @@ average scores from different model vintages. The source path signatures and
 selected date bounds form part of the pool-cache key, so a changed selection
 rebuilds the cache automatically.
 
+`start` and `end` bound the requested period, but market bars define the
+simulation timeline. In particular, a growing local market file may end before
+`end`; the run intentionally stops at its last available market bar rather than
+inventing missing bars or zero returns. Prediction and benchmark observations
+beyond that bar are not evaluated. Read the dates in the generated output as
+the effective backtest period.
+
 ### Benchmark
 
 The backtest reads benchmark returns only from `market_cache_dir`; it does not
@@ -193,7 +200,7 @@ locally installed and authenticated `rqdatac` package (and optionally
 | `cost_per_turnover` | One-way transaction cost; default is 4.5 bp. |
 | `portfolio_initial_value` | Initial notional value for the share-based accounting. |
 | `agg_mode` | Intraday-to-daily return aggregation: `simple` or `compound`. |
-| `compounding` | Use geometric rather than arithmetic annualization for metrics. |
+| `compounding` | Use geometric rather than arithmetic annualization for the annual-return metric; cumulative reporting remains arithmetic. |
 | `exclude_period` | Optional `[start, end]` interval excluded from final evaluation metrics only. |
 
 ### Securities borrowing (SBL)
@@ -267,6 +274,14 @@ bridged across a missing symbol date. The daily price path is:
 previous close -> execution VWAP -> bar close
 ```
 
+With `trade_on_next_bar: true`, the signal is available at the previous close.
+The simulator deliberately determines the share quantity from that previous
+close, then executes that quantity at the next bar's execution VWAP and marks
+it to the bar close. This matches an order workflow in which quantities are
+computed after the prior close and before the following open. It is therefore
+intentional that a target weight is a prior-close sizing instruction, rather
+than an exact execution-VWAP notional weight.
+
 ### Intraday market data
 
 The 15-minute and 5-minute parquets require:
@@ -296,6 +311,9 @@ They may be any of these forms:
 Each input file must contain unique `(datetime, symbol)` rows. By default,
 multiple prediction files must cover non-overlapping date ranges; choose
 `prediction_merge_mode: mean` to combine overlapping forecasts deliberately.
+The loader enforces timestamp alignment, not the provenance of a forecast or
+its features. Prediction production remains responsible for ensuring each
+signal was available by its recorded timestamp.
 
 ## Trading and return semantics
 
@@ -322,10 +340,20 @@ excess return is `portfolio - benchmark`; short excess return is
 `benchmark - portfolio`. Costs are already deducted by the simulator and are
 not deducted again during evaluation.
 
-Metrics use 242 trading days per year. By default annual return is arithmetic
-mean daily return times 242; `compounding: true` selects geometric annualization.
-Maximum drawdown is calculated from `1 + cumulative_sum(daily_return)` and the
-0.1% drawdown quantile.
+The current execution model is intentionally a binary-feasibility model: it
+uses turnover and limit flags to allow or block trades, then applies the flat
+configured transaction cost. It does not model participation limits, market
+impact, order-queue priority, partial fills, or capacity. Treat it as a
+selection backtest under this stated execution convention, not as a capacity
+estimate, until a richer execution model is added.
+
+Metrics use 242 trading days per year. Reporting is intentionally arithmetic:
+by default annual return is mean daily return times 242, cumulative series are
+simple sums of daily returns, and drawdown is calculated from
+`1 + cumulative_sum(daily_return)` using the 0.1% drawdown quantile. These are
+the project's reference metrics rather than compounded wealth, CAGR, or the
+single worst peak-to-trough drawdown. `compounding: true` changes the
+annual-return metric to geometric annualization only.
 
 ## Outputs
 
@@ -336,8 +364,8 @@ output directory contains:
 | --- | --- |
 | `metrics_{P}_{B}.csv` | One row per portfolio size: annual return, volatility, Sharpe, max drawdown, Calmar, and annual turnover. |
 | `returns_{P}_{B}.csv` | Daily excess returns, one column per portfolio size. |
-| `cumrets_{P}_{B}.csv` | Cumulative daily excess returns. |
-| `portfolio_pnl_{N}.csv` | Daily strategy, benchmark, mode-aware evaluation return, turnover, borrow cost, close-count, and cumulative PnL series. |
+| `cumrets_{P}_{B}.csv` | Arithmetic cumulative daily excess returns. |
+| `portfolio_pnl_{N}.csv` | Daily strategy, benchmark, mode-aware evaluation return, turnover, borrow cost, close-count, and arithmetic cumulative PnL series. |
 | `positions_{N}.csv` | Actual position snapshots with market, eligibility, forecast, weight, sleeve, and SBL audit fields when applicable. |
 | `target_weights_{N}.csv` and `.parquet` | Ideal target-weight snapshots for intraday runs. |
 | `plots_long/`, `plots_short/`, or `plots_long_short/` | Portfolio overview, metrics table, holding-period, and position-size charts. |
