@@ -88,9 +88,11 @@ I/O inside `_simulate_portfolio_core`.
 - `RUN_DIR` is the directory holding the active `config.yml`. Relative market,
   prediction, and cache paths must remain relative to that directory;
   `OUTPUT_DIR` must remain inside it.
-- Backtests must read benchmark returns only through `market_cache.py` using
-  `market_cache_dir` and `benchmark_symbol`. Keep RQData imports inside the
-  explicit refresh path; never make normal backtest execution fetch data.
+- Backtests must read benchmark returns only through `market_cache.py`. Preserve
+  the existing `bm_path` / `bm_name` configuration and `date, ret` CSV contract;
+  it is adapted internally to the directory/symbol reader. Keep RQData imports
+  inside the explicit refresh path; never make normal backtest execution fetch
+  data.
 - Prediction files are only read from the direct `preds_dir` directory; do not
   recursively mix neighboring experiment outputs. Each file must have unique
   `(datetime, symbol)` keys.
