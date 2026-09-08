@@ -9,6 +9,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,8 @@ from plotting import (
     plot_portfolio_results,
 )
 from portfolio import PortfolioResult, generate_portfolio
+from optimizer_adapter import prepare_optimizer_targets
+from optimizer_client import OptimizerClient
 
 
 @dataclass(slots=True)
@@ -332,6 +335,8 @@ def _with_sleeve(result: PortfolioResult, sleeve: str) -> PortfolioResult:
         turnover=result.turnover,
         held_counts=result.held_counts,
         target_weights=target_weights,
+        optimizer_calls=result.optimizer_calls,
+        decision_targets=result.decision_targets,
     )
 
 
@@ -433,6 +438,7 @@ def _mode_result(
     *,
     port_size: int,
     output_dir: str,
+    optimizer_client: OptimizerClient | None = None,
 ) -> PortfolioResult:
     common = {
         "pool": pool,
@@ -442,7 +448,7 @@ def _mode_result(
         "strict_first_bar_top_n": cfg.STRICT_FIRST_BAR_TOP_N,
         "output_dir": output_dir,
         "plot_heatmap": False,
-        "record_target_weights": cfg.FREQUENCY != "daily",
+        "record_target_weights": cfg.FREQUENCY != "daily" or optimizer_client is not None,
         "debug_mode": cfg.DEBUG,
         "debug_symbol": cfg.DEBUG_SYMBOL,
         "debug_datetime": cfg.DEBUG_DATETIME,
@@ -457,7 +463,28 @@ def _mode_result(
         "thresh_out_buffer": cfg.THRESH_OUT_BUFFER,
     }
     if mode == "long_only":
-        return _with_sleeve(generate_portfolio(is_short=False, **long_common), "long")
+        optimizer_plan = None
+        if optimizer_client is not None:
+            optimizer_plan = prepare_optimizer_targets(
+                pool,
+                optimizer_client,
+                portfolio_id=f"long:{port_size}",
+                port_size=port_size,
+                thresh_out_buffer=cfg.THRESH_OUT_BUFFER,
+                size_cut=cfg.POOL_SIZE,
+                close_on_size_drop=cfg.CLOSE_ON_SIZE_DROP,
+                model=cfg.OPTIMIZER["model"],
+                timeout_ms=cfg.OPTIMIZER["timeout_ms"],
+                audit_path=Path(output_dir) / "optimizer_calls.jsonl",
+            )
+        try:
+            return _with_sleeve(
+                generate_portfolio(is_short=False, optimizer_plan=optimizer_plan, **long_common),
+                "long",
+            )
+        finally:
+            if optimizer_plan is not None:
+                optimizer_plan.close()
     short_port_size, short_thresh_out_buffer = _short_sleeve_parameters(port_size)
     short_common = {
         **common,
@@ -471,7 +498,7 @@ def _mode_result(
     return _combine_sleeves(long_result, short_result)
 
 
-def run() -> None:
+def _run(optimizer_client: OptimizerClient | None) -> None:
     logger.info("Run directory: {} (config: {})", cfg.RUN_DIR, cfg.CONFIG_PATH)
     needs_short = any(mode != "long_only" for mode in cfg.STRATEGY_MODES)
     if needs_short and not cfg.SHORT_BORROW_SOURCES:
@@ -500,16 +527,27 @@ def run() -> None:
         mode_dir = cfg.output_dir_for_mode(mode)
         mode_dir.mkdir(parents=True, exist_ok=True)
         output_dir = str(mode_dir) + os.sep
+        if cfg.OPTIMIZER["enabled"]:
+            (mode_dir / "optimizer_calls.jsonl").write_text("", encoding="utf-8")
+        decision_target_frames: list[pd.DataFrame] = []
         all_metrics, all_ret, all_cumrets, all_port_sizes, all_closes = {}, {}, {}, {}, {}
         for port_size in cfg.PORT_SIZES:
             logger.info("── {} portfolio size: {} ──", mode, port_size)
-            result = _mode_result(pool, mode, port_size=port_size, output_dir=output_dir)
+            result = _mode_result(
+                pool, mode, port_size=port_size, output_dir=output_dir,
+                optimizer_client=optimizer_client,
+            )
             _write_positions_csv(result.positions, f"{output_dir}positions_{port_size}.csv")
             if result.target_weights is not None:
                 _write_target_weights(
                     result.target_weights,
                     f"{output_dir}target_weights_{port_size}.csv",
                     f"{output_dir}target_weights_{port_size}.parquet",
+                )
+            if result.decision_targets is not None:
+                decision_target_frames.append(result.decision_targets)
+                pl.from_pandas(pd.concat(decision_target_frames, ignore_index=True)).write_parquet(
+                    mode_dir / "decision_targets.parquet"
                 )
             evaluation = evaluate_portfolio_result(
                 result=result,
@@ -567,6 +605,36 @@ def run() -> None:
             output_path=output_dir,
             strategy_mode=mode,
         )
+
+
+def run() -> None:
+    if not cfg.OPTIMIZER["enabled"]:
+        _run(None)
+        return
+    status_path = cfg.RUN_DIR / "optimizer_run_status.json"
+    status_path.write_text(json.dumps({"status": "running", "complete": False}), encoding="utf-8")
+    try:
+        # Connect and validate capabilities before loading external market data.
+        with OptimizerClient(
+            cfg.OPTIMIZER["socket_path"],
+            protocol_version=cfg.OPTIMIZER["protocol_version"],
+            schema_version=cfg.OPTIMIZER["schema_version"],
+            timeout_ms=cfg.OPTIMIZER["timeout_ms"],
+            request_timeout_ms=cfg.OPTIMIZER["request_timeout_ms"],
+            max_control_bytes=cfg.OPTIMIZER["max_control_bytes"],
+            max_shared_bytes=cfg.OPTIMIZER["max_shared_bytes"],
+        ) as optimizer_client:
+            optimizer_client.validate_capacity(max(cfg.PORT_SIZES))
+            _run(optimizer_client)
+    except Exception as exc:
+        status_path.write_text(json.dumps({
+            "status": "failed", "complete": False,
+            "error_type": type(exc).__name__, "error": str(exc),
+        }, ensure_ascii=False), encoding="utf-8")
+        raise
+    status_path.write_text(json.dumps({"status": "success", "complete": True}), encoding="utf-8")
+
+
 if __name__ == "__main__":
     import time
 
