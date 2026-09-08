@@ -107,9 +107,7 @@ freq_config:
             self.assertEqual(module.CONFIG_PATH, run_dir / "config.yml")
             self.assertEqual(module.MARKET_CACHE_DIR, run_dir / "market_cache")
             self.assertEqual(module.BENCHMARK_SYMBOL, "000852")
-            self.assertIsNone(module.BM_PATH)
-            self.assertIsNone(module.BM_NAME)
-            self.assertEqual(module.BENCHMARK_NAME, "000852")
+            self.assertFalse(hasattr(module, "BM_PATH"))
             self.assertFalse(hasattr(module, "EXTERNAL_NAV_PATH"))
             self.assertEqual(module.POOL_CACHE_DIR, run_dir / "cache")
             self.assertEqual(module.FREQ_CONFIG["daily"]["market_data"], run_dir / "market.parquet")
@@ -117,65 +115,6 @@ freq_config:
             self.assertEqual(module.SHORT_PORT_SIZE, 200)
             self.assertEqual(module.SHORT_EXIT_RANK, 300)
             self.assertEqual(module.OUTPUT_DIR, run_dir / "output_long_4400_daily")
-
-    def test_legacy_benchmark_config_keeps_path_name_and_ret_file_identity(self) -> None:
-        with TemporaryDirectory() as tmp:
-            run_dir = Path(tmp).resolve()
-            (run_dir / "config.yml").write_text(
-                """
-frequency: daily
-bm_path: benchmark/ret_csi_1000.csv
-bm_name: csi_1000
-freq_config:
-  daily:
-    market_data: market.parquet
-    preds_dir: predictions
-""".lstrip(),
-                encoding="utf-8",
-            )
-            module_name = "_legacy_benchmark_config_test"
-            spec = importlib.util.spec_from_file_location(module_name, Path(__file__).parents[1] / "config.py")
-            self.assertIsNotNone(spec)
-            self.assertIsNotNone(spec.loader)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            try:
-                with patch.dict(os.environ, {"EQ_BACKTEST_RUN_DIR": str(run_dir)}):
-                    spec.loader.exec_module(module)
-            finally:
-                sys.modules.pop(module_name, None)
-
-            self.assertEqual(module.BM_PATH, run_dir / "benchmark/ret_csi_1000.csv")
-            self.assertEqual(module.BM_NAME, "csi_1000")
-            self.assertEqual(module.MARKET_CACHE_DIR, run_dir / "benchmark")
-            self.assertEqual(module.BENCHMARK_SYMBOL, "ret_csi_1000")
-            self.assertEqual(module.BENCHMARK_NAME, "csi_1000")
-
-    def test_existing_ret_benchmark_csv_loads_without_data_conversion(self) -> None:
-        with TemporaryDirectory() as tmp:
-            benchmark_dir = Path(tmp) / "benchmark"
-            benchmark_dir.mkdir()
-            (benchmark_dir / "ret_csi_1000.csv").write_text(
-                ",benchmark_close,ret,benchmark_close_simple\n"
-                "2024-01-02,100,0.001,0.001\n"
-                "2024-01-03,99.8,-0.002,-0.001\n"
-                "2024-01-04,100.1,0.003,0.002\n",
-                encoding="utf-8",
-            )
-
-            returns = load_benchmark_returns(
-                benchmark_dir,
-                "ret_csi_1000",
-                start="2024-01-03",
-                end="2024-01-04",
-            )
-
-            self.assertEqual(
-                returns.index.tolist(),
-                [pd.Timestamp("2024-01-03"), pd.Timestamp("2024-01-04")],
-            )
-            self.assertEqual(returns.tolist(), [-0.002, 0.003])
-            self.assertEqual(returns.name, "ret")
 
     def test_short_sleeve_parameters_use_independent_size_without_exit_buffer(self) -> None:
         with patch("run.cfg.SHORT_PORT_SIZE", 200), patch("run.cfg.SHORT_EXIT_RANK", 300):

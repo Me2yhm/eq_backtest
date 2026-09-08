@@ -111,7 +111,7 @@ def resolve_cached_instrument(cache_dir: Path, symbol: str) -> CachedInstrument:
 
 def _read_cache_rows(path: Path) -> dict[date, tuple[float, float]]:
     if not path.is_file():
-        raise MarketDataCacheError(f"Benchmark CSV is missing: {path}")
+        raise MarketDataCacheError(f"Benchmark cache is missing: {path}")
     rows: dict[date, tuple[float, float]] = {}
     try:
         handle = path.open("r", encoding="utf-8-sig", newline="")
@@ -141,50 +141,6 @@ def _read_cache_rows(path: Path) -> dict[date, tuple[float, float]]:
     return rows
 
 
-def _read_return_rows(path: Path) -> dict[date, float]:
-    """Read benchmark returns from either the existing or normalized CSV.
-
-    Existing EQ Backtest datasets use ``ret`` and do not need ``close``.  The
-    normalized cache's ``pct_change`` remains readable for runs that already
-    use it, but it is not required by the backtest data contract.
-    """
-    if not path.is_file():
-        raise MarketDataCacheError(f"Benchmark cache is missing: {path}")
-    try:
-        handle = path.open("r", encoding="utf-8-sig", newline="")
-    except OSError as exc:
-        raise MarketDataCacheError(f"Cannot read benchmark cache: {path}") from exc
-    rows: dict[date, float] = {}
-    with handle:
-        reader = csv.DictReader(handle)
-        fields = reader.fieldnames
-        if not fields:
-            raise MarketDataCacheError(f"Benchmark CSV has no header: {path}")
-        date_field = "date" if "date" in fields else fields[0]
-        return_field = (
-            "ret" if "ret" in fields
-            else "pct_change" if "pct_change" in fields
-            else None
-        )
-        if return_field is None:
-            raise MarketDataCacheError(f"{path} must contain a ret column.")
-        for line_number, row in enumerate(reader, start=2):
-            try:
-                timestamp = pd.to_datetime(row[date_field], errors="raise")
-                if pd.isna(timestamp):
-                    raise ValueError("missing benchmark date")
-                observation_date = timestamp.date()
-                value = float(row[return_field])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise MarketDataCacheError(f"{path.name} row {line_number} is invalid.") from exc
-            if observation_date in rows or not math.isfinite(value):
-                raise MarketDataCacheError(f"{path.name} row {line_number} is invalid or duplicated.")
-            rows[observation_date] = value
-    if not rows:
-        raise MarketDataCacheError(f"Benchmark cache is empty: {path}")
-    return rows
-
-
 def _parse_bound(value: str | None, *, name: str) -> date | None:
     if value is None:
         return None
@@ -201,17 +157,17 @@ def load_benchmark_returns(
     start: str | None = None,
     end: str | None = None,
 ) -> pd.Series:
-    """Return daily benchmark returns for *symbol* from a local CSV."""
+    """Return cached close-to-close daily benchmark returns for *symbol*."""
     start_date = _parse_bound(start, name="start")
     end_date = _parse_bound(end, name="end")
     if start_date is not None and end_date is not None and start_date > end_date:
         raise MarketDataCacheError("start must not be after end.")
 
     instrument = resolve_cached_instrument(cache_dir, symbol)
-    rows = _read_return_rows(instrument.path)
+    rows = _read_cache_rows(instrument.path)
     selected = [
-        (observation_date, value)
-        for observation_date, value in sorted(rows.items())
+        (observation_date, pct_change)
+        for observation_date, (_, pct_change) in sorted(rows.items())
         if (start_date is None or observation_date >= start_date)
         and (end_date is None or observation_date <= end_date)
     ]
@@ -220,7 +176,7 @@ def load_benchmark_returns(
             f"Benchmark {symbol!r} has no cached returns in the requested date range."
         )
     index = pd.DatetimeIndex([observation_date for observation_date, _ in selected], name="date")
-    return pd.Series([value for _, value in selected], index=index, name="ret", dtype=float)
+    return pd.Series([pct_change for _, pct_change in selected], index=index, name="ret", dtype=float)
 
 
 def _rqdatac_client() -> object:
