@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,9 @@ from numba import njit
 
 from data_loader import BacktestDataset
 from plotting import plot_position_heatmap
+
+if TYPE_CHECKING:
+    from optimizer_adapter import OptimizerTargetPlan
 
 
 @dataclass(slots=True)
@@ -30,6 +34,8 @@ class PortfolioResult:
     turnover: pd.Series
     held_counts: pd.Series
     target_weights: pd.DataFrame | None = None
+    optimizer_calls: list[dict] | None = None
+    decision_targets: pd.DataFrame | None = None
 
 
 def _borrow_calendar_fractions(bars: pd.DatetimeIndex) -> np.ndarray:
@@ -175,6 +181,11 @@ def _simulate_portfolio_core(
     max_weight_multiple: float,
     debug_target_symbol_id: int,
     debug_target_bar_idx: int,
+    optimizer_enabled: bool,
+    optimizer_events: np.ndarray,
+    optimizer_offsets: np.ndarray,
+    optimizer_symbol_ids: np.ndarray,
+    optimizer_weights_by_bar,
 ) -> tuple:
     n_bars = len(bar_offsets) - 1
     eps = 1e-12
@@ -413,7 +424,10 @@ def _simulate_portfolio_core(
                         debug_signal_rank = rank
 
         n_closed = 0
-        if has_signal and has_ranked_signal:
+        should_rebalance = has_signal and has_ranked_signal
+        if optimizer_enabled and has_signal:
+            should_rebalance = optimizer_events[signal_bar_idx] != 0
+        if should_rebalance:
             # 1) Ideal target layer: keep previous target names while they remain
             # inside the exit buffer, then only consider current signal names
             # inside the top-N rank frontier. If some names inside that frontier
@@ -422,50 +436,70 @@ def _simulate_portfolio_core(
             # zero-turnover or one-sided price-limit states. It only requires
             # the name to be present on the bar and pass the daily base
             # universe checks.
-            new_target_count = 0
-            for i in range(target_count):
-                symbol_id = target_symbols[i]
-                exec_row_idx = current_row[symbol_id]
-                target_valid_listed = exec_row_idx != -1 and can_open_base[exec_row_idx]
-                # Short turnover is governed by the actual top-N opening
-                # frontier. Long sleeves retain their configured exit buffer.
-                target_exit_rank = port_size if is_short else thresh_out
-                target_rank_rule = (
-                    rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > target_exit_rank
-                )
-                target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
-                if target_rank_rule or target_size_rule or not target_valid_listed:
-                    target[symbol_id] = False
-                else:
-                    target_symbols[new_target_count] = symbol_id
-                    new_target_count += 1
-            target_count = new_target_count
+            if optimizer_enabled:
+                for i in range(target_count):
+                    target[target_symbols[i]] = False
+                target_count = 0
+                if optimizer_events[signal_bar_idx] == 1:
+                    external_start = optimizer_offsets[signal_bar_idx]
+                    external_end = optimizer_offsets[signal_bar_idx + 1]
+                    external_weights = optimizer_weights_by_bar[signal_bar_idx]
+                    if external_end - external_start != len(external_weights):
+                        raise ValueError("optimizer target metadata/weight length mismatch")
+                    for external_idx in range(external_end - external_start):
+                        symbol_id = optimizer_symbol_ids[external_start + external_idx]
+                        target[symbol_id] = True
+                        target_symbols[target_count] = symbol_id
+                        target_count += 1
+            else:
+                new_target_count = 0
+                for i in range(target_count):
+                    symbol_id = target_symbols[i]
+                    exec_row_idx = current_row[symbol_id]
+                    target_valid_listed = exec_row_idx != -1 and can_open_base[exec_row_idx]
+                    # Short turnover is governed by the actual top-N opening
+                    # frontier. Long sleeves retain their configured exit buffer.
+                    target_exit_rank = port_size if is_short else thresh_out
+                    target_rank_rule = (
+                        rank_by_symbol[symbol_id] == 0 or rank_by_symbol[symbol_id] > target_exit_rank
+                    )
+                    target_size_rule = close_on_size_drop and not signal_in_size_pool[symbol_id]
+                    if target_rank_rule or target_size_rule or not target_valid_listed:
+                        target[symbol_id] = False
+                    else:
+                        target_symbols[new_target_count] = symbol_id
+                        new_target_count += 1
+                target_count = new_target_count
 
-            for pos in range(order_start, order_end):
-                if target_count == port_size:
-                    break
-                signal_row_idx = sorted_rows[pos]
-                symbol_id = row_symbol_ids[signal_row_idx]
-                exec_row_idx = current_row[symbol_id]
-                signal_rank = rank_by_symbol[symbol_id]
-                if debug_this_bar and symbol_id == debug_target_symbol_id:
-                    target_seen_in_open_loop = True
+                for pos in range(order_start, order_end):
+                    if target_count == port_size:
+                        break
+                    signal_row_idx = sorted_rows[pos]
+                    symbol_id = row_symbol_ids[signal_row_idx]
+                    exec_row_idx = current_row[symbol_id]
+                    signal_rank = rank_by_symbol[symbol_id]
+                    if debug_this_bar and symbol_id == debug_target_symbol_id:
+                        target_seen_in_open_loop = True
 
-                if signal_rank == 0:
-                    continue
-                if signal_rank > port_size:
-                    break
+                    if signal_rank == 0:
+                        continue
+                    if signal_rank > port_size:
+                        break
 
-                target_can_enter = exec_row_idx != -1 and can_open_base[exec_row_idx]
+                    target_can_enter = exec_row_idx != -1 and can_open_base[exec_row_idx]
 
-                if signal_in_size_pool[symbol_id] and target_can_enter and not target[symbol_id]:
-                    target[symbol_id] = True
-                    target_symbols[target_count] = symbol_id
-                    target_count += 1
+                    if signal_in_size_pool[symbol_id] and target_can_enter and not target[symbol_id]:
+                        target[symbol_id] = True
+                        target_symbols[target_count] = symbol_id
+                        target_count += 1
 
             target_weight_by_symbol[:] = 0.0
             if target_count > 0:
-                if weight_mode_code == 0:
+                if optimizer_enabled:
+                    external_weights = optimizer_weights_by_bar[signal_bar_idx]
+                    for i in range(target_count):
+                        target_weight_by_symbol[target_symbols[i]] = external_weights[i]
+                elif weight_mode_code == 0:
                     for i in range(target_count):
                         target_weight_by_symbol[target_symbols[i]] = nominal_weight
                 else:
@@ -715,7 +749,7 @@ def _simulate_portfolio_core(
         #   - 仍持有但权重变化的股票
         #   - 已清仓的股票 (curr_weights=0, marktomarket_weights>0)
         #   - 新开仓的股票 (curr_weights>0, marktomarket_weights=0)
-        if has_signal and has_ranked_signal:
+        if should_rebalance:
             touched_count = 0
             for i in range(prev_count):
                 symbol_id = prev_symbols[i]
@@ -767,7 +801,7 @@ def _simulate_portfolio_core(
         # 涨跌停但 vwap>0 的股票也更新 shares，避免 shares 陈旧导致
         # marktomarket_weights 偏离 Reference。
         transaction_cost = 0.0
-        if has_signal and has_ranked_signal:
+        if should_rebalance:
             transaction_cost = portfolio_value * 2.0 * turnover * cost_per_turnover
             portfolio_value -= transaction_cost
             # 同步 weights → shares（对齐 Reference tradable_mask: vwap 有效即可）
@@ -892,8 +926,8 @@ def _simulate_portfolio_core(
                 target_rec_weight[target_rec_count] = target_weight_by_symbol[symbol_id]
                 target_rec_count += 1
 
-        for i in range(target_count):
-            target_weight_by_symbol[target_symbols[i]] = 0.0
+        # Keep the last accepted ideal target through no-signal bars. A later
+        # rebalance clears and rebuilds this array atomically before execution.
 
     return (
         rec_bar_idx[:rec_count],
@@ -1091,6 +1125,36 @@ def _materialize_weight_snapshots(
     return result.set_index(["date", "symbol"]).sort_index()
 
 
+def _attach_optimizer_audit(
+    positions: pd.DataFrame,
+    target_weights: pd.DataFrame | None,
+    decision_targets: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    if decision_targets.empty:
+        return positions, target_weights
+    audit = decision_targets[["request_id", "decision_as_of", "planned_execution_at", "symbol"]].copy()
+    planned = pd.to_datetime(audit["planned_execution_at"])
+    if planned.dt.tz is not None:
+        planned = planned.dt.tz_localize(None)
+    audit["execution_date"] = planned.dt.normalize()
+    event_audit = audit[["execution_date", "request_id", "decision_as_of"]].drop_duplicates("execution_date")
+
+    position_frame = positions.reset_index()
+    position_frame["execution_date"] = pd.to_datetime(position_frame["date"]).dt.normalize()
+    position_frame = position_frame.merge(event_audit, on="execution_date", how="left").drop(columns="execution_date")
+    positions = position_frame.set_index(["date", "symbol"]).sort_index()
+
+    if target_weights is not None:
+        target_frame = target_weights.reset_index()
+        target_frame["execution_date"] = pd.to_datetime(target_frame["date"]).dt.normalize()
+        target_frame = target_frame.merge(
+            audit[["execution_date", "symbol", "request_id", "decision_as_of"]],
+            on=["execution_date", "symbol"], how="left",
+        ).drop(columns="execution_date")
+        target_weights = target_frame.set_index(["date", "symbol"]).sort_index()
+    return positions, target_weights
+
+
 def generate_portfolio(
     pool: BacktestDataset,
     port_size: int,
@@ -1110,6 +1174,7 @@ def generate_portfolio(
     portfolio_initial_value: float = 1e8,
     weight_mode: str = "equal",
     max_weight_multiple: float = 2.0,
+    optimizer_plan: "OptimizerTargetPlan | None" = None,
 ) -> PortfolioResult:
     """Simulate a frequency-independent equal-weight portfolio with daily constraints."""
     thresh_out = port_size + thresh_out_buffer
@@ -1125,6 +1190,28 @@ def generate_portfolio(
     debug_target_symbol_id, debug_target_bar_idx = (
         _resolve_debug_target_indices(pool, debug_symbol, debug_datetime) if debug_mode else (-1, -1)
     )
+
+    if optimizer_plan is None:
+        from numba import types
+        from numba.typed import List
+
+        optimizer_events = np.zeros(len(pool.bars), dtype=np.int8)
+        optimizer_offsets = np.zeros(len(pool.bars) + 1, dtype=np.int64)
+        optimizer_symbol_ids = np.empty(0, dtype=np.int32)
+        optimizer_weights_by_bar = List.empty_list(types.Array(types.float64, 1, "C", readonly=True))
+        for _ in range(len(pool.bars)):
+            empty = np.empty(0, dtype=np.float64)
+            empty.setflags(write=False)
+            optimizer_weights_by_bar.append(empty)
+        optimizer_enabled = False
+    else:
+        if is_short or not trade_on_next_bar:
+            raise ValueError("optimizer targets require long-only next-day execution")
+        optimizer_events = optimizer_plan.events
+        optimizer_offsets = optimizer_plan.offsets
+        optimizer_symbol_ids = optimizer_plan.symbol_ids
+        optimizer_weights_by_bar = optimizer_plan.weights_by_bar
+        optimizer_enabled = True
 
     (
         rec_bar_idx,
@@ -1197,6 +1284,11 @@ def generate_portfolio(
         max_weight_multiple=max_weight_multiple,
         debug_target_symbol_id=debug_target_symbol_id,
         debug_target_bar_idx=debug_target_bar_idx,
+        optimizer_enabled=optimizer_enabled,
+        optimizer_events=optimizer_events,
+        optimizer_offsets=optimizer_offsets,
+        optimizer_symbol_ids=optimizer_symbol_ids,
+        optimizer_weights_by_bar=optimizer_weights_by_bar,
     )
 
     if debug_mode:
@@ -1256,6 +1348,10 @@ def generate_portfolio(
             rec_weight=target_rec_weight,
             weight_column="weight_target",
         )
+    if optimizer_plan is not None:
+        positions, target_weights = _attach_optimizer_audit(
+            positions, target_weights, optimizer_plan.decision_targets
+        )
 
     if plot_heatmap:
         plot_position_heatmap(positions, port_num=port_size, is_short=is_short, output_path=output_dir)
@@ -1269,6 +1365,8 @@ def generate_portfolio(
         turnover=turnover,
         held_counts=held_counts,
         target_weights=target_weights,
+        optimizer_calls=optimizer_plan.calls if optimizer_plan is not None else None,
+        decision_targets=optimizer_plan.decision_targets if optimizer_plan is not None else None,
     )
 
 
@@ -1297,6 +1395,14 @@ def generate_target_weights(
     bars = pd.to_datetime(pool.bars)
     bar_day_index = pd.factorize(bars.normalize())[0].astype(np.int32)
     bar_borrow_fractions = _borrow_calendar_fractions(bars)
+    from numba import types
+    from numba.typed import List
+
+    optimizer_weights_by_bar = List.empty_list(types.Array(types.float64, 1, "C", readonly=True))
+    for _ in range(len(pool.bars)):
+        empty = np.empty(0, dtype=np.float64)
+        empty.setflags(write=False)
+        optimizer_weights_by_bar.append(empty)
 
     (
         _rec_bar_idx,
@@ -1369,6 +1475,11 @@ def generate_target_weights(
         max_weight_multiple=max_weight_multiple,
         debug_target_symbol_id=-1,
         debug_target_bar_idx=-1,
+        optimizer_enabled=False,
+        optimizer_events=np.zeros(len(pool.bars), dtype=np.int8),
+        optimizer_offsets=np.zeros(len(pool.bars) + 1, dtype=np.int64),
+        optimizer_symbol_ids=np.empty(0, dtype=np.int32),
+        optimizer_weights_by_bar=optimizer_weights_by_bar,
     )
 
     return _materialize_weight_snapshots(
