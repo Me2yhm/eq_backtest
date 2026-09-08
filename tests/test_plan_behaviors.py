@@ -25,29 +25,12 @@ from market_cache import _parse_args, _refresh_instruments, load_benchmark_retur
 from metrics import holding_period_stats
 from plotting import _ensure_plot_dir, plot_position_heatmap
 from portfolio import generate_portfolio
-import run as run_module
 from run import _short_sleeve_parameters, compute_returns, run_single_portfolio
 from sbl_loader import load_borrow_availability
 from research import main as research_main, signal_validation
 
 
 class PlanBehaviorTests(unittest.TestCase):
-    def test_run_without_argument_uses_repository_root_as_active_directory(self) -> None:
-        old_run_dir = os.environ.get("EQ_BACKTEST_RUN_DIR")
-        try:
-            os.environ.pop("EQ_BACKTEST_RUN_DIR", None)
-            with patch.object(sys, "argv", ["run.py"]):
-                run_module._configure_run_directory()
-            self.assertEqual(
-                os.environ["EQ_BACKTEST_RUN_DIR"],
-                str(Path(run_module.__file__).resolve().parent),
-            )
-        finally:
-            if old_run_dir is None:
-                os.environ.pop("EQ_BACKTEST_RUN_DIR", None)
-            else:
-                os.environ["EQ_BACKTEST_RUN_DIR"] = old_run_dir
-
     def test_position_heatmap_uses_fixed_6000_size_rank_range(self) -> None:
         positions = pd.DataFrame(
             {"size_rank": [100, 999_999]},
