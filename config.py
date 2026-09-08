@@ -53,6 +53,11 @@ _DEFAULTS: dict = {
             "market_columns": {"execution_vwap": "vwap5", "bar_close": "close"},
         },
     },
+    # Existing direct benchmark CSV contract.  When configured, ``bm_path`` is
+    # adapted to the market-cache reader without changing its ``date, ret``
+    # schema.  The directory/symbol settings remain available for newer runs.
+    "bm_path": None,
+    "bm_name": None,
     "market_cache_dir": "cache/market_data",
     "benchmark_symbol": "000852",
     "pool_cache_dir": "data/.cache",
@@ -111,7 +116,7 @@ _DEFAULTS: dict = {
 }
 
 # Top-level keys whose string value should be converted to ``Path``.
-_PATH_KEYS: frozenset[str] = frozenset({"pool_cache_dir", "market_cache_dir"})
+_PATH_KEYS: frozenset[str] = frozenset({"bm_path", "pool_cache_dir", "market_cache_dir"})
 
 # Keys *inside* each ``freq_config`` sub-table that are paths.
 _FREQ_PATH_KEYS: frozenset[str] = frozenset({"market_data", "preds_dir"})
@@ -177,14 +182,37 @@ def _convert_paths(cfg: dict) -> dict:
     return cfg
 
 
+def _apply_legacy_benchmark_aliases(cfg: dict, overrides: dict) -> dict:
+    """Map the existing ``bm_path`` contract onto the benchmark reader.
+
+    Explicit ``market_cache_dir`` or ``benchmark_symbol`` values still win.
+    This keeps old run files and their ``date, ret`` CSVs usable without a
+    data migration or a second benchmark configuration.
+    """
+    raw_path = overrides.get("bm_path")
+    if raw_path is None:
+        return cfg
+    if not isinstance(raw_path, (str, Path)):
+        raise ValueError("bm_path must be a path or null")
+    path = Path(raw_path)
+    if not path.name:
+        raise ValueError("bm_path must identify a benchmark CSV file")
+    if "market_cache_dir" not in overrides:
+        cfg["market_cache_dir"] = str(path.parent)
+    if "benchmark_symbol" not in overrides:
+        cfg["benchmark_symbol"] = path.stem
+    return cfg
+
+
 def _load() -> dict:
     """Load config.yml (if exists) and deep-merge over defaults."""
     cfg = deepcopy(_DEFAULTS)
+    overrides: dict = {}
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
             overrides = yaml.safe_load(fh) or {}
         cfg = _deep_merge(cfg, overrides)
-    return _convert_paths(cfg)
+    return _convert_paths(_apply_legacy_benchmark_aliases(cfg, overrides))
 
 
 _cfg = _load()
@@ -282,8 +310,11 @@ DATA_PATH: Path = FREQ_CONFIG[FREQUENCY]["market_data"]
 PREDS_DIR: Path = FREQ_CONFIG[FREQUENCY]["preds_dir"]
 HORIZONS: list[str] = FREQ_CONFIG[FREQUENCY]["horizons"]
 
+BM_PATH: Path | None = _cfg["bm_path"]
+BM_NAME: str | None = _cfg["bm_name"]
 MARKET_CACHE_DIR: Path = _cfg["market_cache_dir"]
 BENCHMARK_SYMBOL: str = _cfg["benchmark_symbol"]
+BENCHMARK_NAME: str = BM_NAME or BENCHMARK_SYMBOL
 POOL_CACHE_DIR: Path = _cfg["pool_cache_dir"]
 USE_POOL_CACHE: bool = _cfg["use_pool_cache"]
 BENCHMARK_MISSING_RETURN_POLICY: str = _benchmark_missing_return_policy(_cfg["benchmark_missing_return_policy"])

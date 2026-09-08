@@ -584,7 +584,7 @@ def _run(optimizer_client: OptimizerClient | None) -> None:
         ret_df = pd.DataFrame(all_ret)
         port_sizes_df = pd.DataFrame(all_port_sizes)
         close_df = pd.concat(list(all_closes.values()), axis=1) if all_closes else pd.DataFrame()
-        tag = f"{cfg.POOL_SIZE}_{cfg.BENCHMARK_SYMBOL}"
+        tag = f"{cfg.POOL_SIZE}_{cfg.BENCHMARK_NAME}"
         metrics_df.to_csv(f"{output_dir}metrics_{tag}.csv")
         cumrets_df.to_csv(f"{output_dir}cumrets_{tag}.csv")
         ret_df.to_csv(f"{output_dir}returns_{tag}.csv")
@@ -600,7 +600,7 @@ def _run(optimizer_client: OptimizerClient | None) -> None:
         plot_metrics_table(
             metrics_df,
             cfg.POOL_SIZE,
-            cfg.BENCHMARK_SYMBOL,
+            cfg.BENCHMARK_NAME,
             is_short=mode == "short_only",
             output_path=output_dir,
             strategy_mode=mode,
