@@ -3,7 +3,8 @@ Backtest entry point.
 
 Usage
 -----
-    python run.py runs/my-backtest
+    python run.py
+    python run.py runs/my-backtest  # optional isolated configuration
 """
 
 from __future__ import annotations
@@ -20,25 +21,28 @@ from loguru import logger
 
 
 def _configure_run_directory() -> None:
-    """Require an isolated run directory before importing its configuration."""
-    parser = argparse.ArgumentParser(description="Run an isolated EQ backtest")
+    """Select the repository-root config or an optional isolated run directory."""
+    parser = argparse.ArgumentParser(description="Run an EQ backtest")
     parser.add_argument(
         "run_dir",
         type=Path,
-        help="Existing directory that contains this run's config.yml and receives its results.",
+        nargs="?",
+        default=None,
+        help="Optional config/output directory; omitted uses the repository root config.yml.",
     )
     args = parser.parse_args()
-    run_dir = args.run_dir.expanduser()
-    if not run_dir.is_absolute():
-        run_dir = Path.cwd() / run_dir
-    run_dir = run_dir.resolve()
     repo_dir = Path(__file__).resolve().parent
-    if run_dir == repo_dir:
-        parser.error("run_dir must be a dedicated directory outside the repository root")
-    if not run_dir.is_dir():
-        parser.error(f"run directory does not exist: {run_dir}")
-    if not (run_dir / "config.yml").is_file():
-        parser.error(f"run directory is missing config.yml: {run_dir}")
+    if args.run_dir is None:
+        run_dir = repo_dir
+    else:
+        run_dir = args.run_dir.expanduser()
+        if not run_dir.is_absolute():
+            run_dir = Path.cwd() / run_dir
+        run_dir = run_dir.resolve()
+        if not run_dir.is_dir():
+            parser.error(f"run directory does not exist: {run_dir}")
+        if run_dir != repo_dir and not (run_dir / "config.yml").is_file():
+            parser.error(f"run directory is missing config.yml: {run_dir}")
     os.environ["EQ_BACKTEST_RUN_DIR"] = str(run_dir)
 
 
@@ -611,7 +615,8 @@ def run() -> None:
     if not cfg.OPTIMIZER["enabled"]:
         _run(None)
         return
-    status_path = cfg.RUN_DIR / "optimizer_run_status.json"
+    status_path = cfg.OUTPUT_DIR / "optimizer_run_status.json"
+    status_path.parent.mkdir(parents=True, exist_ok=True)
     status_path.write_text(json.dumps({"status": "running", "complete": False}), encoding="utf-8")
     try:
         # Connect and validate capabilities before loading external market data.

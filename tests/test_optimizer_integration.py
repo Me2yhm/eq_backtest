@@ -97,6 +97,7 @@ class OptimizerIntegrationTests(unittest.TestCase):
             client.__enter__.return_value = client
             with (
                 patch.object(run_module.cfg, "RUN_DIR", Path(tmp)),
+                patch.object(run_module.cfg, "OUTPUT_DIR", Path(tmp) / "output_long_2_daily"),
                 patch.object(run_module.cfg, "PORT_SIZES", [2]),
                 patch.object(run_module.cfg, "OPTIMIZER", {
                     "enabled": True, "socket_path": Path(tmp) / "service.sock",
@@ -109,7 +110,11 @@ class OptimizerIntegrationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "boom"):
                     run_module.run()
-            status = json.loads((Path(tmp) / "optimizer_run_status.json").read_text(encoding="utf-8"))
+            status = json.loads(
+                (Path(tmp) / "output_long_2_daily" / "optimizer_run_status.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             self.assertEqual(status["status"], "failed")
             self.assertFalse(status["complete"])
 
