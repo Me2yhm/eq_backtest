@@ -146,17 +146,8 @@ freq_config:
 
 | 键 | 默认值 | 说明 |
 |---|---|---|
-| `bm_path` | `null` | 原有基准收益 CSV；支持 `date, ret`，无需转换数据格式 |
-| `bm_name` | `null` | 原有基准名称，用于输出文件命名 |
-| `market_cache_dir` | `cache/market_data` | 已使用本地市场缓存的运行可选配置；设置 `bm_path` 时自动取其父目录 |
-| `benchmark_symbol` | `"000852"` | 已使用本地市场缓存的运行可选标识；设置 `bm_path` 时自动取文件名 stem |
-
-现有配置可继续直接使用：
-
-```yaml
-bm_path: "/ext/eq_data/ret_csi_1000.csv"
-bm_name: "csi_1000"
-```
+| `market_cache_dir` | `data/market_cache` | 本地市场缓存目录，每个基准一个规范化 CSV |
+| `benchmark_symbol` | `"000852"` | 本次回测使用的缓存基准标识；用于输出文件命名 |
 
 ### 3.5 股票池与策略参数
 

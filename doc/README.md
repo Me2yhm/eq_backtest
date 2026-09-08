@@ -47,8 +47,8 @@ directory for every experiment. Run directories are ignored by Git.
 frequency: "daily"
 start: "2024-01-01"
 end: "2024-12-31"
-bm_path: "/absolute/path/to/ret_csi_1000.csv"
-bm_name: "csi_1000"
+market_cache_dir: "../../cache/market_data"
+benchmark_symbol: "000852"
 freq_config:
   daily:
     market_data: "/absolute/path/to/daily_market.parquet"
@@ -111,8 +111,8 @@ values. Path-valued configuration is converted to `pathlib.Path`.
 | `freq_config.<frequency>.prediction_sources` | Optional exact list of selected prediction parquets, each with optional inclusive date bounds. It overrides `horizons`. |
 | `prediction_merge_mode` | `concat_disjoint` rejects overlapping prediction date ranges; `mean` averages overlaps by `(datetime, symbol)`. |
 | `use_pool_cache`, `pool_cache_dir` | Enable and locate the encoded-pool cache and normalized SBL cache. When false, both caches are bypassed and SBL workbooks are streamed without a cache write. |
-| `bm_path`, `bm_name` | Existing benchmark CSV and its output label. The CSV keeps the `date, ret` contract. |
-| `market_cache_dir`, `benchmark_symbol` | Optional directory/symbol form for runs already using the local market cache. When `bm_path` is present, its parent directory and filename stem are used unless these fields are explicitly set. |
+| `market_cache_dir` | Directory containing normalized, per-symbol benchmark caches. |
+| `benchmark_symbol` | Cached benchmark symbol selected for this run. |
 | `benchmark_missing_return_policy` | `error` (default) rejects a missing benchmark return for any backtest date; `zero` is an explicit opt-in for dates intentionally treated as zero. |
 
 `freq_config.<frequency>.horizons` is the legacy discovery mechanism: it is
@@ -154,24 +154,20 @@ the effective backtest period.
 
 ### Benchmark
 
-Existing EQ Backtest benchmark files remain the primary compatible input. Set
-`bm_path` to the CSV and `bm_name` to the label used in output filenames. The
-CSV needs a `ret` column and either a `date` column or a date-valued first
-column. No `close` or `pct_change` conversion is required:
+The backtest reads benchmark returns only from `market_cache_dir`; it does not
+read a NAV parquet or a one-off benchmark CSV. Set `benchmark_symbol` to one
+cached instrument, for example `000852`. Each cache file has `date`, `close`,
+and `pct_change` columns; `pct_change` is the close-to-close daily return used
+for excess-return evaluation. A `manifest.json` may map either an
+`instrument_id` or an RQData symbol (such as `000852.XSHG`) to its cache file,
+which permits many benchmarks in the same directory.
 
-```yaml
-bm_path: "/ext/eq_data/ret_csi_1000.csv"
-bm_name: "csi_1000"
-```
-
-Internally, a configured `bm_path` is adapted to the common local reader using
-its parent directory and filename stem. Runs that already use the optional
-per-symbol market cache may continue to set `market_cache_dir` and
-`benchmark_symbol`; those settings are not required for an existing `ret` CSV.
-Normal backtest execution never fetches benchmark data.
-
-The optional cache refresh command remains available for separately managed
-RQData caches:
+The default local cache is `cache/market_data/`.
+From a run directory under `runs/<name>`, configure it as
+`market_cache_dir: "../../cache/market_data"`. To create or update
+cache files with RQData, run an explicit refresh; RQData is not imported by a
+backtest. The refresh reads every `instrument_id`, `rq_symbol`, and
+`first_date` from `cache/manifest.json`:
 
 ```bash
 uv run python market_cache.py
@@ -441,7 +437,7 @@ annual-return metric to geometric annualization only.
 
 ## Outputs
 
-For a run with pool size `P`, benchmark name `B`, and portfolio size `N`, the
+For a run with pool size `P`, benchmark symbol `B`, and portfolio size `N`, the
 output directory contains:
 
 | Path | Contents |
