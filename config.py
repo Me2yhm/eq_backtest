@@ -89,6 +89,25 @@ _DEFAULTS: dict = {
     "debug_datetime": "2019-01-03 09:46:00",
     # ── Eligibility and output ────────────────────────────────────────────────
     "nosuspend_days": 10,
+    # ── Optional same-host optimizer service ─────────────────────────────────
+    "optimizer": {
+        "enabled": False,
+        "transport": "shared_memory",
+        "protocol_version": "shm/1",
+        "control": "unix_domain_socket",
+        "socket_path": "ipc/optimizer.sock",
+        "backend": "memfd",
+        "zero_copy": "required",
+        "schema_version": "1.1",
+        "model": {"type": "equal_weight", "version": "1", "config": {}},
+        "timeout_ms": 5000,
+        "request_timeout_ms": 6000,
+        "max_inflight_per_session": 1,
+        "max_control_bytes": 1048576,
+        "max_shared_bytes": 268435456,
+        "failure_policy": "fail",
+        "max_retries": 0,
+    },
 }
 
 # Top-level keys whose string value should be converted to ``Path``.
@@ -152,6 +171,9 @@ def _convert_paths(cfg: dict) -> dict:
         for source in raw_borrow_sources:
             if isinstance(source, dict) and isinstance(source.get("path"), (str, Path)):
                 source["path"] = _resolve_config_path(source["path"])
+    optimizer = cfg.get("optimizer")
+    if isinstance(optimizer, dict) and isinstance(optimizer.get("socket_path"), (str, Path)):
+        optimizer["socket_path"] = _resolve_config_path(optimizer["socket_path"])
     return cfg
 
 
@@ -191,6 +213,50 @@ def _optional_positive_int(raw: object, key: str) -> int | None:
         return None
     if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
         raise ValueError(f"{key} must be a positive integer or null")
+    return raw
+
+
+def _optimizer_config(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        raise ValueError("optimizer must be an object")
+    allowed = {
+        "enabled", "transport", "protocol_version", "control", "socket_path", "backend",
+        "zero_copy", "schema_version", "model", "timeout_ms", "request_timeout_ms",
+        "max_inflight_per_session", "max_control_bytes", "max_shared_bytes",
+        "failure_policy", "max_retries",
+    }
+    unknown = set(raw).difference(allowed)
+    if unknown:
+        raise ValueError(f"Unsupported optimizer settings: {sorted(unknown)}")
+    enabled = raw.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("optimizer.enabled must be boolean")
+    if not isinstance(raw.get("socket_path"), Path):
+        raise ValueError("optimizer.socket_path must be a path")
+    for key in ("timeout_ms", "request_timeout_ms", "max_control_bytes", "max_shared_bytes"):
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"optimizer.{key} must be a positive integer")
+    if raw["request_timeout_ms"] < raw["timeout_ms"]:
+        raise ValueError("optimizer.request_timeout_ms must be >= optimizer.timeout_ms")
+    if not enabled:
+        return raw
+    try:
+        raw["socket_path"].resolve().relative_to(RUN_DIR.resolve())
+    except ValueError as exc:
+        raise ValueError("optimizer.socket_path must remain inside the dedicated run directory") from exc
+    exact = {
+        "transport": "shared_memory", "protocol_version": "shm/1",
+        "control": "unix_domain_socket", "backend": "memfd", "zero_copy": "required",
+        "schema_version": "1.1", "failure_policy": "fail", "max_retries": 0,
+        "max_inflight_per_session": 1,
+    }
+    for key, value in exact.items():
+        if raw.get(key) != value:
+            raise ValueError(f"optimizer.{key} must be {value!r}")
+    model = raw.get("model")
+    if model != {"type": "equal_weight", "version": "1", "config": {}}:
+        raise ValueError("optimizer.model must be equal_weight/1 with empty config")
     return raw
 
 
@@ -259,6 +325,7 @@ DEBUG_DATETIME: str = _cfg["debug_datetime"]
 
 # ── Eligibility and output ────────────────────────────────────────────────────
 NOSUSPEND_DAYS: int = _cfg["nosuspend_days"]
+OPTIMIZER: dict = _optimizer_config(_cfg["optimizer"])
 
 
 def output_dir_for_mode(mode: str) -> Path:
@@ -275,3 +342,12 @@ OUTPUT_DIR: Path = output_dir_for_mode(STRATEGY_MODES[0])
 def trade_on_next_bar_for(frequency: str) -> bool:
     """Return the frequency-specific execution-lag setting."""
     return bool(FREQ_CONFIG.get(frequency, {}).get("trade_on_next_bar", TRADE_ON_NEXT_BAR))
+
+
+if OPTIMIZER["enabled"]:
+    if FREQUENCY != "daily" or STRATEGY_MODES != ("long_only",):
+        raise ValueError("optimizer is currently supported only for daily + long_only")
+    if WEIGHT_MODE != "equal":
+        raise ValueError("optimizer equal_weight integration requires weight_mode='equal'")
+    if not trade_on_next_bar_for(FREQUENCY):
+        raise ValueError("optimizer daily integration requires trade_on_next_bar=true")
