@@ -203,6 +203,86 @@ locally installed and authenticated `rqdatac` package (and optionally
 | `compounding` | Use geometric rather than arithmetic annualization for the annual-return metric; cumulative reporting remains arithmetic. |
 | `exclude_period` | Optional `[start, end]` interval excluded from final evaluation metrics only. |
 
+### Optional optimizer service (daily long-only)
+
+The optimizer path is off by default and is currently restricted to `daily`,
+`long_only`, `weight_mode: equal`, and next-day execution. When enabled, EQ
+Backtest still selects the rank-band target names, but obtains their final
+weights from the independently running `equal_weight/1` service. The client does
+not recalculate or normalize a successful response. Intraday and short modes
+continue to use the local path.
+
+The v0.2 capital policy preserves the existing denominator: if `M` valid target
+names are selected for a configured size `N`, the request budget is `M/N`, each
+service weight is `1/N`, and the unallocated amount stays in cash. A valid signal
+that explicitly produces no target is a local liquidation event; absence of a
+ranked signal is `no_signal` and does not call the service or reset the book.
+
+Start the sibling optimizer checkout first, using an absolute socket path inside
+the run directory:
+
+```bash
+cd /path/to/optimizer
+uv run --python 3.11 python -m service \
+  --socket /path/to/eq-backtest/runs/v6-optimizer/ipc/optimizer.sock
+```
+
+Then enable the fixed shm/1 contract in that run's `config.yml`:
+
+```yaml
+frequency: daily
+strategy_modes: [long_only]
+weight_mode: equal
+freq_config:
+  daily:
+    trade_on_next_bar: true
+optimizer:
+  enabled: true
+  transport: shared_memory
+  protocol_version: "shm/1"
+  control: unix_domain_socket
+  socket_path: ipc/optimizer.sock
+  backend: memfd
+  zero_copy: required
+  schema_version: "1.1"
+  model: {type: equal_weight, version: "1", config: {}}
+  timeout_ms: 5000
+  request_timeout_ms: 6000
+  max_inflight_per_session: 1
+  max_control_bytes: 1048576
+  max_shared_bytes: 268435456
+  failure_policy: fail
+  max_retries: 0
+```
+
+Relative `optimizer.socket_path` values resolve from the dedicated run directory.
+Startup performs HELLO, HEALTH, and CAPABILITIES checks. Unreachable service,
+timeout, version/model/policy mismatch, malformed handles, invalid weights, and
+late-session identity all fail the experiment with zero retry and no local or
+HTTP fallback.
+
+Successful service runs additionally write `optimizer_calls.jsonl` and
+`decision_targets.parquet` in the mode output directory. Calls include skipped
+events, request/session/epoch/buffer identity, decision and planned execution
+timestamps, budget, byte-copy counters, and timing. `target_weights_*.parquet`
+remains the execution-time ideal target, while positions remain actual holdings;
+the two are intentionally not collapsed.
+The run directory also receives `optimizer_run_status.json`; service/config/data
+failures leave it as `failed` with `complete: false`, and no successful summary
+is fabricated from partially written outputs.
+
+With the service running, a synthetic latency/copy audit can be repeated without
+production data:
+
+```bash
+uv run python scripts/benchmark_optimizer.py --socket /absolute/run/ipc/optimizer.sock
+```
+
+The first request is treated as warm-up. The report separates control wait from
+service model time and reports shared payload and transport-copy bytes.
+The checked-in synthetic acceptance record is
+[OPTIMIZER_VERIFICATION_V0.2.md](OPTIMIZER_VERIFICATION_V0.2.md).
+
 ### Securities borrowing (SBL)
 
 `strategy_modes` explicitly selects any of `long_only`, `short_only`, and
