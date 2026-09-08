@@ -166,3 +166,5 @@ docs
 tmp/
 
 *.db
+
+*optimizer
