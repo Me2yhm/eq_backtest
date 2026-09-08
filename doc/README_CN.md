@@ -70,9 +70,6 @@ uv sync                 # 根据 pyproject.toml 安装依赖（pandas/polars/num
 .venv\Scripts\python.exe run.py  # Windows
 ```
 
-默认读取仓库根目录的 `config.yml`；也可以把配置放入独立目录后，将该目录作为
-`run.py` 的可选位置参数传入。
-
 运行结束后，结果写入 `config.py` 中 `OUTPUT_DIR` 指定目录，
 目录名由 `long/short + pool_size + frequency` 拼接，例如：
 

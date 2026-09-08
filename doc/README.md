@@ -38,14 +38,12 @@ for dependency management.
 uv sync
 ```
 
-By default, a backtest reads the repository-root `config.yml` and writes its
-CSV/Parquet results and charts to a frequency/mode-specific directory in the
-repository root. An optional positional run directory is supported when an
-experiment needs an isolated configuration and cache. Run directories are
-ignored by Git.
+Each backtest must use a dedicated run directory. It contains that run's own
+`config.yml`, pool cache, CSV/Parquet results, and charts; use a distinct
+directory for every experiment. Run directories are ignored by Git.
 
 ```yaml
-# config.yml
+# runs/v6-baseline/config.yml
 frequency: "daily"
 start: "2024-01-01"
 end: "2024-12-31"
@@ -58,26 +56,19 @@ freq_config:
     horizons: ["5d"]
 ```
 
-Put the configuration above in the repository-root `config.yml` and launch it
+Create the directory, put the configuration above in `config.yml`, and launch it
 from the repository root:
 
 ```bash
-uv run python run.py
-```
-
-The default output is `output_{long|short|long_short}_{pool_size}_{frequency}/`,
-for example `output_long_4400_daily/`. For an isolated experiment, create a
-directory with its own `config.yml` and pass it as the optional argument:
-
-```bash
 mkdir -p runs/v6-baseline
-cp config.yml runs/v6-baseline/config.yml
 uv run python run.py runs/v6-baseline
 ```
 
-Relative paths resolve from the active configuration directory. Pool caches stay
-at the configured `pool_cache_dir`; result files and optimizer status stay in the
-mode output directory.
+The positional run directory must already exist and contain `config.yml`. Relative
+paths in that configuration are resolved from the run directory, not the
+repository root. The first run builds `data/.cache/` there; output is written to
+`output_{long|short|long_short}_{pool_size}_{frequency}/` there, for example
+`runs/v6-baseline/output_long_4400_daily/`.
 
 ## Docker
 
@@ -231,16 +222,16 @@ service weight is `1/N`, and the unallocated amount stays in cash. A valid signa
 that explicitly produces no target is a local liquidation event; absence of a
 ranked signal is `no_signal` and does not call the service or reset the book.
 
-Start the sibling optimizer checkout first, using an absolute socket path under
-the active configuration directory:
+Start the sibling optimizer checkout first, using an absolute socket path inside
+the run directory:
 
 ```bash
 cd /path/to/optimizer
 uv run --python 3.11 python -m service \
-  --socket /path/to/eq-backtest/ipc/optimizer.sock
+  --socket /path/to/eq-backtest/runs/v6-optimizer/ipc/optimizer.sock
 ```
 
-Then enable the fixed shm/1 contract in the repository-root `config.yml`:
+Then enable the fixed shm/1 contract in that run's `config.yml`:
 
 ```yaml
 frequency: daily
@@ -268,8 +259,7 @@ optimizer:
   max_retries: 0
 ```
 
-Relative `optimizer.socket_path` values resolve from the active configuration
-directory (the repository root when no run directory argument is supplied).
+Relative `optimizer.socket_path` values resolve from the dedicated run directory.
 Startup performs HELLO, HEALTH, and CAPABILITIES checks. Unreachable service,
 timeout, version/model/policy mismatch, malformed handles, invalid weights, and
 late-session identity all fail the experiment with zero retry and no local or
@@ -281,9 +271,9 @@ events, request/session/epoch/buffer identity, decision and planned execution
 timestamps, budget, byte-copy counters, and timing. `target_weights_*.parquet`
 remains the execution-time ideal target, while positions remain actual holdings;
 the two are intentionally not collapsed.
-The mode output directory also receives `optimizer_run_status.json`; service,
-config, or data failures leave it as `failed` with `complete: false`, and no
-successful summary is fabricated from partially written outputs.
+The run directory also receives `optimizer_run_status.json`; service/config/data
+failures leave it as `failed` with `complete: false`, and no successful summary
+is fabricated from partially written outputs.
 
 With the service running, a synthetic latency/copy audit can be repeated without
 production data:
@@ -306,7 +296,7 @@ unit of each sleeve (2.0 gross). Each selected mode writes its own
 `output_{long|short|long_short}_{pool_size}_{frequency}/` directory.
 
 A short mode requires an explicit source list. The source path is resolved from
-the active configuration directory and must be an `.xlsx` Yading workbook for now:
+the dedicated run directory and must be an `.xlsx` Yading workbook for now:
 
 ```yaml
 strategy_modes: [long_only, short_only, long_short]

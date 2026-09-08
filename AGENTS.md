@@ -27,15 +27,14 @@ implementation specification.
 ```bash
 uv sync
 uv run python -m unittest discover -s tests -v
-uv run python run.py
+uv run python run.py runs/<name>
 ```
 
-Run commands from the repository root. With no positional argument, `run.py`
-reads the repository-root `config.yml` and writes the frequency/mode-specific
-output directory there. An optional positional run directory remains supported
-for isolated experiments; its own `config.yml`, relative paths, pool cache, and
-results resolve inside that directory. Never commit `runs/`, `run_*/`,
-`backtest_runs/`, local data, cache files, or generated charts.
+Run commands from the repository root. `run.py` requires an existing dedicated
+run directory containing its own `config.yml`; relative configuration paths,
+pool cache, and results resolve inside it. Use one directory per experiment and
+never commit `runs/`, `run_*/`, `backtest_runs/`, local data, cache files, or
+generated charts.
 
 There is no configured formatter, linter, or type checker. Preserve the existing
 typed, module-oriented Python style, add focused tests for behavioral changes,
@@ -86,9 +85,9 @@ I/O inside `_simulate_portfolio_core`.
 
 - `config.py` deep-merges only dictionaries. Add a default for every new public
   configuration key and update `doc/README.md` in the same change.
-- `RUN_DIR` is the directory holding the active `config.yml` (the repository
-  root by default). Relative market, prediction, and cache paths must remain
-  relative to that directory; `OUTPUT_DIR` must remain inside it.
+- `RUN_DIR` is the directory holding the active `config.yml`. Relative market,
+  prediction, and cache paths must remain relative to that directory;
+  `OUTPUT_DIR` must remain inside it.
 - Backtests must read benchmark returns only through `market_cache.py`. Preserve
   the existing `bm_path` / `bm_name` configuration and `date, ret` CSV contract;
   it is adapted internally to the directory/symbol reader. Keep RQData imports
