@@ -188,13 +188,8 @@ def prepare_optimizer_targets(
         pool, port_size=port_size, thresh_out=port_size + thresh_out_buffer,
         size_cut=size_cut, close_on_size_drop=close_on_size_drop,
     )
-    required_shared_bytes = sum(len(selection) * 8 for selection in selections)
-    service_limit = client.capabilities.get("limits", {}).get("max_shared_bytes_per_session")
-    if not isinstance(service_limit, int) or required_shared_bytes > min(service_limit, client.max_shared_bytes):
-        raise OptimizerClientError(
-            f"optimizer target leases require {required_shared_bytes} shared bytes, above the session limit",
-            client.capabilities,
-        )
+    required_resident_bytes = sum(len(selection) * 8 for selection in selections)
+    client.validate_resident_bytes(required_resident_bytes)
     offsets = np.zeros(len(pool.bars) + 1, dtype=np.int64)
     flat_parts: list[np.ndarray] = []
     leases: list[OptimizerLease] = []
@@ -298,8 +293,9 @@ def prepare_optimizer_targets(
                 "protocol_version": client.protocol_version, "model_type": model["type"],
                 "model_version": model["version"], "session_id": client.session_id,
                 "service_epoch": client.service_epoch, "buffer_id": descriptor["buffer_id"],
-                "generation": descriptor["generation"], "shared_bytes": descriptor["nbytes"],
-                "staging_bytes": 0, "copy_bytes": 0, "wait_ms": wait_ms,
+                "generation": descriptor["generation"], "shared_bytes": lease.shared_bytes,
+                "staging_bytes": response.get("diagnostics", {}).get("staging_bytes", 0),
+                "copy_bytes": lease.copy_bytes, "wait_ms": wait_ms,
                 "audit_materialization_bytes": descriptor["nbytes"],
                 "prepare_ms": prepare_ms,
                 "mapping_validation_ms": lease.mapping_validation_ms,
