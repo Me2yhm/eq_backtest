@@ -57,7 +57,7 @@ from plotting import (
 )
 from portfolio import PortfolioResult, generate_portfolio
 from optimizer_adapter import prepare_optimizer_targets
-from optimizer_client import OptimizerClient
+from optimizer_client import create_optimizer_client
 
 
 @dataclass(slots=True)
@@ -614,16 +614,8 @@ def run() -> None:
     status_path = cfg.RUN_DIR / "optimizer_run_status.json"
     status_path.write_text(json.dumps({"status": "running", "complete": False}), encoding="utf-8")
     try:
-        # Connect and validate capabilities before loading external market data.
-        with OptimizerClient(
-            cfg.OPTIMIZER["socket_path"],
-            protocol_version=cfg.OPTIMIZER["protocol_version"],
-            schema_version=cfg.OPTIMIZER["schema_version"],
-            timeout_ms=cfg.OPTIMIZER["timeout_ms"],
-            request_timeout_ms=cfg.OPTIMIZER["request_timeout_ms"],
-            max_control_bytes=cfg.OPTIMIZER["max_control_bytes"],
-            max_shared_bytes=cfg.OPTIMIZER["max_shared_bytes"],
-        ) as optimizer_client:
+        # Validate the selected backend before loading external market data.
+        with create_optimizer_client(cfg.OPTIMIZER) as optimizer_client:
             optimizer_client.validate_capacity(max(cfg.PORT_SIZES))
             _run(optimizer_client)
     except Exception as exc:
