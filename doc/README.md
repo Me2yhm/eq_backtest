@@ -203,14 +203,16 @@ locally installed and authenticated `rqdatac` package (and optionally
 | `compounding` | Use geometric rather than arithmetic annualization for the annual-return metric; cumulative reporting remains arithmetic. |
 | `exclude_period` | Optional `[start, end]` interval excluded from final evaluation metrics only. |
 
-### Optional optimizer service (daily long-only)
+### Optional optimizer backend (daily long-only)
 
 The optimizer path is off by default and is currently restricted to `daily`,
 `long_only`, `weight_mode: equal`, and next-day execution. When enabled, EQ
 Backtest still selects the rank-band target names, but obtains their final
-weights from the independently running `equal_weight/1` service. The client does
-not recalculate or normalize a successful response. Intraday and short modes
-continue to use the local path.
+weights from the installed `optimizer` package. `optimizer.mode: inprocess`
+is the default and requires no daemon. `optimizer.mode: shared_memory` keeps
+the existing independent shm/1 service for process-isolated deployments. Both
+modes execute the same optimizer core and Schema 1.1 contract. Intraday and
+short modes continue to use the local path.
 
 The v0.2 capital policy preserves the existing denominator: if `M` valid target
 names are selected for a configured size `N`, the request budget is `M/N`, each
@@ -218,8 +220,19 @@ service weight is `1/N`, and the unallocated amount stays in cash. A valid signa
 that explicitly produces no target is a local liquidation event; absence of a
 ranked signal is `no_signal` and does not call the service or reset the book.
 
-Start the sibling optimizer checkout first, using an absolute socket path inside
-the run directory:
+For the default in-process mode, no optimizer process is started:
+
+```yaml
+optimizer:
+  enabled: true
+  mode: inprocess
+  schema_version: "1.1"
+  model: {type: equal_weight, version: "1", config: {}}
+  timeout_ms: 5000
+```
+
+To use process isolation instead, start the sibling optimizer checkout first,
+using an absolute socket path inside the run directory:
 
 ```bash
 cd /path/to/optimizer
@@ -238,6 +251,7 @@ freq_config:
     trade_on_next_bar: true
 optimizer:
   enabled: true
+  mode: shared_memory
   transport: shared_memory
   protocol_version: "shm/1"
   control: unix_domain_socket
@@ -256,10 +270,11 @@ optimizer:
 ```
 
 Relative `optimizer.socket_path` values resolve from the dedicated run directory.
-Startup performs HELLO, HEALTH, and CAPABILITIES checks. Unreachable service,
-timeout, version/model/policy mismatch, malformed handles, invalid weights, and
-late-session identity all fail the experiment with zero retry and no local or
-HTTP fallback.
+In shared-memory mode startup performs HELLO, HEALTH, and CAPABILITIES checks.
+Unreachable service, timeout, version/model/policy mismatch, malformed handles,
+invalid weights, and late-session identity all fail the experiment with zero
+retry and no HTTP fallback. In-process mode validates the same logical contract
+without socket, memfd, or service lifecycle overhead.
 
 Successful service runs additionally write `optimizer_calls.jsonl` and
 `decision_targets.parquet` in the mode output directory. Calls include skipped
