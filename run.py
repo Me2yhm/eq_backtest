@@ -57,7 +57,7 @@ from plotting import (
 )
 from portfolio import PortfolioResult, generate_portfolio
 from optimizer_adapter import prepare_optimizer_targets
-from optimizer_client import create_optimizer_client
+from optimizer_client import OptimizerClient, create_optimizer_client
 
 
 @dataclass(slots=True)
