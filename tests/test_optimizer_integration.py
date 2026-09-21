@@ -85,7 +85,7 @@ class OptimizerIntegrationTests(unittest.TestCase):
         with (
             patch.object(run_module.cfg, "OPTIMIZER", {"enabled": False}),
             patch.object(run_module, "_run") as execute,
-            patch.object(run_module, "OptimizerClient") as client_type,
+            patch.object(run_module, "create_optimizer_client") as client_type,
         ):
             run_module.run()
         execute.assert_called_once_with(None)
@@ -104,7 +104,7 @@ class OptimizerIntegrationTests(unittest.TestCase):
                     "timeout_ms": 5, "request_timeout_ms": 6,
                     "max_control_bytes": 1024, "max_shared_bytes": 1024,
                 }),
-                patch.object(run_module, "OptimizerClient", return_value=client),
+                patch.object(run_module, "create_optimizer_client", return_value=client),
                 patch.object(run_module, "_run", side_effect=RuntimeError("boom")),
             ):
                 with self.assertRaisesRegex(RuntimeError, "boom"):
@@ -112,6 +112,31 @@ class OptimizerIntegrationTests(unittest.TestCase):
             status = json.loads((Path(tmp) / "optimizer_run_status.json").read_text(encoding="utf-8"))
             self.assertEqual(status["status"], "failed")
             self.assertFalse(status["complete"])
+
+    def test_inprocess_optimizer_client_is_callable(self) -> None:
+        from optimizer_client import InProcessOptimizerClient
+
+        request = {
+            "schema_version": "1.1", "request_id": "eq-direct",
+            "data_context": {"as_of": "2026-09-01T15:00:00+08:00",
+                             "planned_execution_at": "2026-09-02T09:30:00+08:00",
+                             "frequency": "daily"},
+            "portfolio_policy": {"long_only": True, "fully_invested": False,
+                                 "allow_cash": True, "allow_leverage": False,
+                                 "cash_policy": "retain", "target_budget": 0.5},
+            "model": {"type": "equal_weight", "version": "1", "config": {}},
+            "universe": {"asset_ids": ["A", "B"]},
+            "constraints": [],
+            "options": {"timeout_ms": 5000, "deterministic": True},
+        }
+        with InProcessOptimizerClient() as client:
+            lease, _ = client.optimize(request)
+            try:
+                np.testing.assert_array_equal(lease.weights, [0.25, 0.25])
+                self.assertEqual(lease.transport, "inprocess")
+                self.assertEqual(lease.shared_bytes, 0)
+            finally:
+                lease.release()
 
     @unittest.skipUnless(os.environ.get("RUN_OPTIMIZER_IPC_TESTS") == "1", "requires UDS permission")
     def test_client_rejects_invalid_shared_weight_sum_before_publication(self) -> None:
