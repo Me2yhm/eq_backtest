@@ -315,6 +315,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "openpyxl" },
+    { name = "optimizer" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "polars" },
@@ -330,6 +331,7 @@ requires-dist = [
     { name = "numba" },
     { name = "numpy" },
     { name = "openpyxl", specifier = ">=3.1" },
+    { name = "optimizer", git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=feature%2Fdual-mode-architecture" },
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow", specifier = ">=23.0.1" },
@@ -926,6 +928,15 @@ dependencies = [
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz", hash = "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl", hash = "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2" },
+]
+
+[[package]]
+name = "optimizer"
+version = "0.2.0"
+source = { git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=feature%2Fdual-mode-architecture#5ffb23e30f25c97200e5a9013f8fc0db834c682f" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [[package]]
