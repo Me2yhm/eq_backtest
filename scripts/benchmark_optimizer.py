@@ -28,7 +28,9 @@ def _percentile(values: list[float], percentile: float) -> float:
 def benchmark(mode: str, socket_path: Path | None, sizes: list[int], repeats: int) -> list[dict]:
     results = []
     backend = InProcessOptimizerClient() if mode == "inprocess" else OptimizerClient(socket_path)
+    connect_started = time.perf_counter_ns()
     with backend as client:
+        connection_setup_ms = (time.perf_counter_ns() - connect_started) / 1_000_000
         client.validate_capacity(max(sizes))
         before_fds = len(os.listdir("/proc/self/fd"))
         for size in sizes:
@@ -68,6 +70,7 @@ def benchmark(mode: str, socket_path: Path | None, sizes: list[int], repeats: in
                     calls.append(call_ms)
                 else:
                     warmup_ms = call_ms
+                    first_wait_ms, first_model_ms = wait_ms, model_ms
             results.append({
                 "mode": mode, "assets": size, "repeats": repeats,
                 "wait_p50_ms": statistics.median(waits), "wait_p95_ms": _percentile(waits, 0.95),
@@ -75,6 +78,8 @@ def benchmark(mode: str, socket_path: Path | None, sizes: list[int], repeats: in
                 "call_p50_ms": statistics.median(calls), "call_p95_ms": _percentile(calls, 0.95),
                 "mapping_p50_ms": statistics.median(mapping_times), "mapping_p95_ms": _percentile(mapping_times, 0.95),
                 "warmup_call_ms": warmup_ms,
+                "first_call_wait_ms": first_wait_ms, "first_call_model_ms": first_model_ms,
+                "connection_setup_ms": connection_setup_ms,
                 "payload_bytes": size * 8, "shared_bytes": shared_bytes, "transport_copy_bytes": copy_bytes,
             })
         after_fds = len(os.listdir("/proc/self/fd"))

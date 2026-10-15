@@ -1,0 +1,72 @@
+name: Optimizer integration
+
+on:
+  push:
+    branches: [5min-old]
+  pull_request:
+    branches: [5min-old]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install uv
+        run: python -m pip install uv==0.12.10
+      - name: Install frozen private Git dependency
+        # Configure OPTIMIZER_READ_TOKEN as a read-only Contents token scoped to
+        # Me2yhm/optimizer (fine-grained PAT or GitHub App installation token).
+        # Fork pull requests receive no secret and fail this gate explicitly.
+        env:
+          OPTIMIZER_READ_TOKEN: ${{ secrets.OPTIMIZER_READ_TOKEN }}
+        shell: python
+        run: |
+          import base64
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+
+          token = os.environ.get("OPTIMIZER_READ_TOKEN", "")
+          if not token:
+              sys.exit("CI dependency authorization missing: configure read-only OPTIMIZER_READ_TOKEN for Me2yhm/optimizer; integration has not run.")
+          authorization = base64.b64encode(("x-access-token:" + token).encode()).decode()
+          environment = os.environ.copy()
+          environment.pop("OPTIMIZER_READ_TOKEN", None)
+          with tempfile.NamedTemporaryFile(mode="w", prefix="optimizer-read-", dir=os.environ["RUNNER_TEMP"], delete=False) as handle:
+              configuration = Path(handle.name)
+              handle.write('[url "https://github.com/Me2yhm/optimizer.git"]\n')
+              handle.write('\tinsteadOf = ssh://git@github.com/Me2yhm/optimizer.git\n')
+              handle.write('[http "https://github.com/Me2yhm/optimizer.git"]\n')
+              handle.write('\textraheader = AUTHORIZATION: basic ' + authorization + '\n')
+          try:
+              configuration.chmod(0o600)
+              environment.update({"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": str(configuration)})
+              subprocess.run(["uv", "sync", "--frozen", "--python", "3.14"], env=environment, check=True)
+          finally:
+              configuration.unlink(missing_ok=True)
+      - name: Full suite with SHM and real CLI comparison
+        env:
+          RUN_OPTIMIZER_IPC_TESTS: "1"
+        run: |
+          uv run --frozen python -c 'import sys, numpy, numba, polars; print(sys.version); print("numpy", numpy.__version__, "numba", numba.__version__, "polars", polars.__version__)'
+          uv run --frozen python -m unittest discover -s tests -v
+          uv run --frozen python scripts/verify_optimizer_modes.py --work-dir "$RUNNER_TEMP/optimizer-cli-verification"
+      - name: Preserve CLI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimizer-cli-verification
+          path: ${{ runner.temp }}/optimizer-cli-verification
+          if-no-files-found: ignore

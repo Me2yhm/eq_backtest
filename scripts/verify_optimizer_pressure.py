@@ -354,6 +354,9 @@ def _compare_long(left: Path, right: Path, expected_events: dict) -> dict:
     target_weights = pd.read_parquet(output_left / "target_weights_4.parquet")
     target_dates = pd.to_datetime(target_weights["date"]).dt.normalize()
     assert "000001.XSHE" in target_weights.loc[target_dates == dates[5], "symbol"].tolist()
+    assert max_weight <= 1e-10, max_weight
+    assert max_return <= 1e-8, max_return
+    assert max_cash <= 1e-10, max_cash
     return {"compared_files": files, "events": observed, "decision_rows": len(targets),
             "max_weight_abs_error": max_weight, "max_daily_return_abs_error": max_return,
             "max_cash_weight_abs_error": max_cash}
