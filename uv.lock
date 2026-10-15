@@ -941,7 +941,7 @@ wheels = [
 [[package]]
 name = "optimizer"
 version = "0.2.0"
-source = { git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=feature%2Fdual-mode-architecture#5ffb23e30f25c97200e5a9013f8fc0db834c682f" }
+source = { git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=feature%2Fdual-mode-architecture#b205edde54b45d415b84de815e34ee6f81bae03b" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.11'" },

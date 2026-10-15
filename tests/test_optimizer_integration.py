@@ -19,6 +19,7 @@ import pandas as pd
 import polars as pl
 from numba import types
 from numba.typed import List
+from optimizer.transport.shm.buffers import memfd_create
 
 import run as run_module
 from data_loader import BacktestDataset
@@ -145,6 +146,8 @@ class OptimizerIntegrationTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("RUN_OPTIMIZER_IPC_TESTS") == "1", "requires UDS permission")
     def test_client_rejects_invalid_shared_weight_sum_before_publication(self) -> None:
         client_socket, server_socket = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        client_socket.settimeout(2)
+        server_socket.settimeout(2)
         client = OptimizerClient("unused")
         client.socket = client_socket
         client.session_id = "session"
@@ -160,7 +163,7 @@ class OptimizerIntegrationTests(unittest.TestCase):
 
         def respond() -> None:
             server_socket.recv(1_048_576)
-            fd = os.memfd_create("invalid-optimizer-test", flags=os.MFD_CLOEXEC)
+            fd = memfd_create("invalid-optimizer-test")
             os.ftruncate(fd, 16)
             with os.fdopen(os.dup(fd), "r+b", closefd=True) as handle:
                 handle.write(np.asarray([0.3, 0.3], dtype="<f8").tobytes())
