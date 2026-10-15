@@ -88,7 +88,8 @@ def close_optimizer_plan(plan: OptimizerTargetPlan, primary: BaseException | Non
             {"error_type": type(cleanup).__name__, "error": str(cleanup)}
         ]
         owner = primary if primary is not None else cleanup
-        owner.cleanup_errors = list(getattr(owner, "cleanup_errors", [])) + details
+        owner.cleanup_errors = (list(getattr(primary, "cleanup_errors", [])) + details
+                                if primary is not None else details)
         # Retain a retry handle only when exported views still prevent local close.
         if plan.leases:
             owner.optimizer_cleanup_plan = plan
@@ -266,6 +267,8 @@ def prepare_optimizer_targets(
         ).encode("utf-8")
     ).hexdigest()
 
+    plan = OptimizerTargetPlan(events, offsets, np.empty(0, dtype=np.int32),
+                               weights_by_bar, leases, calls, pd.DataFrame())
     weights = None
     try:
         requests = []
@@ -403,27 +406,12 @@ def prepare_optimizer_targets(
                     "target_budget": target_budget,
                     "cash_policy": "retain",
                 })
+        plan.symbol_ids = np.concatenate(flat_parts) if flat_parts else np.empty(0, dtype=np.int32)
+        plan.decision_targets = _decision_target_frame(target_rows)
     except BaseException as primary:
-        plan = OptimizerTargetPlan(
-            events,
-            offsets,
-            np.concatenate(flat_parts) if flat_parts else np.empty(0, dtype=np.int32),
-            weights_by_bar,
-            leases,
-            calls,
-            _decision_target_frame(target_rows),
-        )
         # Drop the local Numba list too before closing mmap-backed leases.
         weights_by_bar = weights = None
         close_optimizer_plan(plan, primary)
         raise
 
-    return OptimizerTargetPlan(
-        events,
-        offsets,
-        np.concatenate(flat_parts) if flat_parts else np.empty(0, dtype=np.int32),
-        weights_by_bar,
-        leases,
-        calls,
-        _decision_target_frame(target_rows),
-    )
+    return plan
