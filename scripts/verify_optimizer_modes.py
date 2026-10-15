@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -110,7 +111,14 @@ def _calls(run_dir: Path, mode: str) -> tuple[list[dict], dict[str, str]]:
             ids[row["request_id"]] = f"{row['portfolio_id']}:{row['decision_as_of']}"
         assert pd.Timestamp(row["decision_as_of"]) < pd.Timestamp(row["planned_execution_at"])
         # Signature includes the transport protocol; check it before normalizing.
-        assert isinstance(row["config_signature"], str) and len(row["config_signature"]) == 64
+        signature = {
+            "model": {"type": "equal_weight", "version": "1", "config": {}},
+            "port_size": int(row["portfolio_id"].split(":")[1]), "thresh_out_buffer": 0,
+            "size_cut": 10, "close_on_size_drop": True, "cash_policy": "retain",
+            "schema_version": "1.1", "protocol_version": "shm/1" if mode == "shared_memory" else "inprocess/1",
+        }
+        expected = hashlib.sha256(json.dumps(signature, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        assert row["config_signature"] == expected
     return calls, ids
 
 
@@ -154,6 +162,7 @@ def _compare(left: Path, right: Path, dates: pd.DatetimeIndex) -> dict:
                 max_return_error = max(max_return_error, error)
 
     targets = pd.read_parquet(left_output / "decision_targets.parquet")
+    max_cash_error = 0.0
     for size in SIZES:
         selected = targets[targets["portfolio_size"] == size]
         np.testing.assert_allclose(selected["weight_target"], 1 / size, rtol=0, atol=1e-10)
@@ -166,11 +175,28 @@ def _compare(left: Path, right: Path, dates: pd.DatetimeIndex) -> dict:
         partial = positions[pd.to_datetime(positions["date"]).dt.normalize() == dates[2]]
         assert partial["symbol"].tolist() == ["000003.XSHE"]
         assert partial["weight_actual"].sum() < 1.0 / size + 0.05
+        carried = positions[pd.to_datetime(positions["date"]).dt.normalize() == dates[3]]
+        assert carried["symbol"].tolist() == ["000003.XSHE"], "no_signal reset the held book"
+        other_positions = pd.read_csv(right_output / f"positions_{size}.csv")
+        cash = []
+        for frame in (positions, other_positions):
+            frame["date"] = pd.to_datetime(frame["date"]).dt.normalize()
+            cash.append(1.0 - frame.groupby("date")["weight_actual"].sum().reindex(dates, fill_value=0.0))
+        cash_error = float((cash[0] - cash[1]).abs().max())
+        assert cash_error <= 1e-8
+        max_cash_error = max(max_cash_error, cash_error)
+        if size == 4:
+            day = positions[positions["date"] == dates[5]]
+            target_day = pd.read_parquet(left_output / "target_weights_4.parquet")
+            target_day = target_day[pd.to_datetime(target_day["date"]).dt.normalize() == dates[5]]
+            assert "000001.XSHE" in target_day["symbol"].tolist()
+            assert "000001.XSHE" not in day["symbol"].tolist(), "limit-up failed to separate target and held"
     assert max_weight_error <= 1e-10 and max_return_error <= 1e-8
     return {
         "compared_files": files, "business_events": len(direct_calls),
         "decision_rows": len(targets), "portfolio_sizes": list(SIZES),
         "max_weight_abs_error": max_weight_error, "max_daily_return_abs_error": max_return_error,
+        "max_cash_weight_abs_error": max_cash_error,
         "events": sorted({row["event"] for row in direct_calls}),
         "normalized_fields": sorted(TRANSPORT_FIELDS | {"request_id"}),
         "signature_rule": "SHA256 of business settings plus protocol_version; protocol differs by backend",

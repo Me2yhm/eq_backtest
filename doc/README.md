@@ -31,7 +31,7 @@ daily returns, while the trading engine remains the same.
 
 ## Installation and first run
 
-The project requires Python 3.11 or later and uses [uv](https://docs.astral.sh/uv/)
+The project requires Python 3.10 or later and uses [uv](https://docs.astral.sh/uv/)
 for dependency management.
 
 ```bash
@@ -290,13 +290,26 @@ With the service running, a synthetic latency/copy audit can be repeated without
 production data:
 
 ```bash
-uv run python scripts/benchmark_optimizer.py --socket /absolute/run/ipc/optimizer.sock
+uv run python scripts/benchmark_optimizer.py --mode both --socket /absolute/run/ipc/optimizer.sock
 ```
 
 The first request is treated as warm-up. The report separates control wait from
 service model time and reports shared payload and transport-copy bytes.
-The checked-in synthetic acceptance record is
-[OPTIMIZER_VERIFICATION_V0.2.md](OPTIMIZER_VERIFICATION_V0.2.md).
+The optimizer SSH Git dependency and `uv.lock` pin the validated revision; ordinary
+syncs retain that exact code. Use `--mode inprocess` for a benchmark without a
+service. A real CLI comparison with fixed synthetic inputs, isolated run configs,
+failure checks, and a JSON difference report is available without market data:
+
+```bash
+uv run python scripts/verify_optimizer_modes.py --work-dir /tmp/eq-dual-verification
+RUN_OPTIMIZER_IPC_TESTS=1 uv run python -m unittest discover -s tests -v
+```
+
+The verification directory must be new. It retains the synthetic fixture, each
+backend's `config.yml`, service/run logs, output files, and `comparison.json`.
+The current dual-mode acceptance record is
+[OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md](OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md).
+[OPTIMIZER_VERIFICATION_V0.2.md](OPTIMIZER_VERIFICATION_V0.2.md) is the earlier SHM-only record.
 
 ### Securities borrowing (SBL)
 
