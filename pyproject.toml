@@ -5,7 +5,7 @@ description = "Equity Cross-sectional Strategy Backtest"
 readme = "doc/README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "optimizer @ git+ssh://git@github.com/Me2yhm/optimizer.git@feature/dual-mode-architecture",
+    "optimizer @ git+ssh://git@github.com/Me2yhm/optimizer.git@2cc03e2c60b04013b871757863b95c9c0b674c8c",
     "pandas",
     "numpy",
     "numba",

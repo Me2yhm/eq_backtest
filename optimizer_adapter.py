@@ -60,12 +60,15 @@ class OptimizerTargetPlan:
     def close(self) -> None:
         self.weights_by_bar = None
         errors: list[Exception] = []
+        pending: list[OptimizerLease] = []
         for lease in self.leases:
             try:
                 lease.release()
             except Exception as exc:
                 errors.append(exc)
-        self.leases.clear()
+                if not lease.released:
+                    pending.append(lease)
+        self.leases = pending
         if errors:
             raise OptimizerClientError(f"failed to release {len(errors)} optimizer lease(s)") from errors[0]
 
@@ -379,6 +382,8 @@ def prepare_optimizer_targets(
             calls,
             _decision_target_frame(target_rows),
         )
+        # Drop the local Numba list too before closing mmap-backed leases.
+        weights_by_bar = None
         plan.close()
         raise
 

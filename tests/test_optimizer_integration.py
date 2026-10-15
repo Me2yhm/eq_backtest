@@ -86,6 +86,19 @@ def _pool(*, second_day_can_open: bool = True) -> BacktestDataset:
 
 
 class OptimizerIntegrationTests(unittest.TestCase):
+    def test_plan_close_preserves_unreleased_leases_for_explicit_retry(self) -> None:
+        lease = MagicMock(released=False)
+        lease.release.side_effect = [OptimizerClientError("output still referenced"), None]
+        plan = OptimizerTargetPlan(
+            np.empty(0, dtype=np.int8), np.zeros(1, dtype=np.int64), np.empty(0, dtype=np.int32),
+            [], [lease], [], pd.DataFrame(),
+        )
+        with self.assertRaises(OptimizerClientError):
+            plan.close()
+        self.assertEqual(plan.leases, [lease])
+        plan.close()
+        self.assertEqual(plan.leases, [])
+
     def test_disabled_run_never_constructs_optimizer_client(self) -> None:
         with (
             patch.object(run_module.cfg, "OPTIMIZER", {"enabled": False}),
@@ -302,14 +315,11 @@ optimizer:
 
     @unittest.skipUnless(os.environ.get("RUN_OPTIMIZER_IPC_TESTS") == "1", "requires UDS permission")
     def test_real_optimizer_process_is_callable_from_eq_client(self) -> None:
-        optimizer_repo = Path(__file__).parents[2] / "optimizer"
-        if not (optimizer_repo / "service.py").is_file():
-            self.skipTest("sibling optimizer checkout is not available")
         with tempfile.TemporaryDirectory() as tmp:
             socket_path = Path(tmp) / "optimizer.sock"
             process = subprocess.Popen(
-                [os.fspath(Path(__file__).parents[1] / ".venv/bin/python"), "-m", "service",
-                 "--socket", str(socket_path)], cwd=optimizer_repo,
+                [sys.executable, "-m", "optimizer.transport.shm.service",
+                 "--socket", str(socket_path)], cwd=tmp,
             )
             try:
                 deadline = time.monotonic() + 5
@@ -358,6 +368,28 @@ optimizer:
                         self.assertTrue(audit_path.read_text(encoding="utf-8").strip())
                     finally:
                         plan.close()
+
+                    before_fds = len(os.listdir("/proc/self/fd"))
+                    original = client.optimize
+                    attempts = 0
+
+                    def fail_second_request(payload):
+                        nonlocal attempts
+                        attempts += 1
+                        if attempts == 2:
+                            raise OptimizerClientError("injected second request failure")
+                        return original(payload)
+
+                    with patch.object(client, "optimize", side_effect=fail_second_request):
+                        with self.assertRaisesRegex(OptimizerClientError, "injected second request failure"):
+                            prepare_optimizer_targets(
+                                _pool(), client, portfolio_id="long:2", port_size=2,
+                                thresh_out_buffer=0, size_cut=10, close_on_size_drop=False,
+                                model={"type": "equal_weight", "version": "1", "config": {}},
+                                timeout_ms=5000,
+                            )
+                    self.assertEqual(attempts, 2)
+                    self.assertEqual(len(os.listdir("/proc/self/fd")), before_fds)
             finally:
                 process.terminate()
                 process.wait(timeout=5)

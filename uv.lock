@@ -336,7 +336,7 @@ requires-dist = [
     { name = "numba" },
     { name = "numpy" },
     { name = "openpyxl", specifier = ">=3.1" },
-    { name = "optimizer", git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=feature%2Fdual-mode-architecture" },
+    { name = "optimizer", git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=2cc03e2c60b04013b871757863b95c9c0b674c8c" },
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow", specifier = ">=23.0.1" },
@@ -941,7 +941,7 @@ wheels = [
 [[package]]
 name = "optimizer"
 version = "0.2.0"
-source = { git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=feature%2Fdual-mode-architecture#b205edde54b45d415b84de815e34ee6f81bae03b" }
+source = { git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=2cc03e2c60b04013b871757863b95c9c0b674c8c#2cc03e2c60b04013b871757863b95c9c0b674c8c" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.11'" },
