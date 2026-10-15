@@ -1,6 +1,18 @@
 {
   "date": "2026-10-15",
   "optimizer_runtime_commit": "2cc03e2c60b04013b871757863b95c9c0b674c8c",
+  "post_merge": {
+    "pull_request_url": "https://github.com/Me2yhm/optimizer/pull/1",
+    "merged_at": "2026-10-15T13:14:15+08:00",
+    "merge_method": "squash",
+    "dependency_commit": "988a1381f0030d93870c36cacddf71efc1815d3f",
+    "validated_branch_head": "9b2cf6a14f33efb0cc754f1dd179b890d93e3420",
+    "identical_git_tree": "13d7f0a740a4cbc61bac010257253ed51c475faf",
+    "eq_backtest_with_ipc_tests": 35,
+    "skipped": 0,
+    "fresh_frozen_sync": "passed",
+    "installed_package_smoke": "passed"
+  },
   "comparison": {
     "compared_files": [
       "cumrets_10_TEST.csv",

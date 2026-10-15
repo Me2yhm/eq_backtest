@@ -1,6 +1,6 @@
 # Optimizer 双模式验收记录
 
-日期：2026-10-15（Asia/Shanghai）。技术结论：**Ready，可提交合并审查**。两个仓库的 Linux 回归、真实 CLI 双模式对比、资源异常测试和独立安装均通过。`optimizer` 的合并目标为 `master`，实际合并仍需用户授权；`eq_backtest/5min-old` 保留原分支。
+日期：2026-10-15（Asia/Shanghai）。结论：**验收完成，已合并**。两个仓库的 Linux 回归、真实 CLI 双模式对比、资源异常测试和独立安装均通过。用户于 13:14 手动将 [optimizer PR #1](https://github.com/Me2yhm/optimizer/pull/1) squash 合并到 `master`；`eq_backtest/5min-old` 保留原分支。
 
 ## 代码与环境
 
@@ -11,7 +11,9 @@
 | optimizer | feature/dual-mode-architecture | b205edde54b45d415b84de815e34ee6f81bae03b | 相对 master 的完整双模式变更及新增异常修复 |
 | eq_backtest | 5min-old | 6cd5f4d2d986efa0023da2b57efaf0133ff6bff1 | 优化器接入相关代码与本次修改 |
 
-`eq_backtest` 的基线比 handoff 多出锁文件、ruff 开发依赖和导入整理三个提交，均已保留。运行时依赖固定为 `optimizer@2cc03e2c60b04013b871757863b95c9c0b674c8c`；后续安装验证脚本和文档提交不改变该运行时代码。
+`eq_backtest` 的基线比 handoff 多出锁文件、ruff 开发依赖和导入整理三个提交，均已保留。初次验收的运行时依赖固定为 `optimizer@2cc03e2c60b04013b871757863b95c9c0b674c8c`，后续安装验证脚本和文档提交没有改变运行时代码。合并后，依赖和锁文件固定到主线提交 `988a1381f0030d93870c36cacddf71efc1815d3f`。
+
+合并提交与已验收的特性分支 HEAD `9b2cf6a14f33efb0cc754f1dd179b890d93e3420` 的完整 Git tree 均为 `13d7f0a740a4cbc61bac010257253ed51c475faf`，文件内容完全一致。由于 squash 合并不保留旧特性提交作为主线祖先，消费者改为固定主线 SHA，以便不依赖特性分支历史。原始测试和性能数据仍对应本记录中的已验收代码。
 
 测试机器为 AMD EPYC 7T83，64 核、128 逻辑 CPU，约 251.5 GiB 内存；Linux `4.18.0-348.7.1.el8_5.x86_64`、小端、uv `0.12.10`。主环境 Python `3.14.3`；optimizer 环境 NumPy `2.5.2`，回测环境 NumPy `2.4.4`、Numba `0.65.0`、Polars `1.39.3`、pandas `3.0.1`。Python 3.11 验证使用 `3.11.9` 和 NumPy `2.4.6`。AF_UNIX、SOCK_SEQPACKET、SCM_RIGHTS 和 memfd 均实际执行；当前 Python 3.14 没有 `os.memfd_create` 时，使用已有 libc 包装。
 
@@ -26,8 +28,10 @@
 | eq_backtest IPC 接入专项 | 11 项通过，服务来自安装包，无兄弟源码目录依赖 |
 | wheel 和 sdist 构建 | 通过；全部 optimizer 模块与源码逐文件一致 |
 | 仓库外 wheel 安装，Python 3.11 | Core、in-process、独立 SHM、控制台入口通过 |
-| 全新环境 uv sync --frozen，Python 3.14 | 通过；SSH Git 安装固定到 2cc03e2 |
+| 初次全新环境 uv sync --frozen，Python 3.14 | 通过；SSH Git 安装固定到 2cc03e2 |
 | 全新环境的仓库外安装验证 | 两种后端均通过，导入路径为 site-packages |
+| 合并后固定 988a138 的完整回归，启用 IPC | 35 项通过，无 skip，包含真实 CLI 双模式对比 |
+| 合并后全新 frozen 环境和仓库外安装验证 | 通过；固定主线 988a138，两种后端均可调用 |
 | compileall 和 git diff --check | 通过 |
 
 重跑命令分别在对应仓库根目录执行：
@@ -113,4 +117,4 @@ uv run python scripts/benchmark_optimizer.py --mode both \
 
 无已知阻塞缺陷。保留的非阻塞边界为：未使用真实生产行情；未验证声明下限 Python 3.10；两仓库均无 GitHub Actions workflow。当前自动化证据覆盖 Linux Python 3.11 和 3.14，后续版本和生产工作负载应按实际部署补验。
 
-建议对 optimizer 创建 `feature/dual-mode-architecture` → `master` 合并申请。用户授权前不实际合并，不删除分支。eq_backtest 保持 `5min-old`，依赖不随分支漂移。回滚时新建独立回测目录并设置 `optimizer.enabled: false`；若回退提交，应同时还原 pyproject.toml 和 uv.lock，不能在一个运行目录混用两种结果。
+optimizer 已由用户通过 PR #1 合并到 `master`，本地 `master` 已快进同步至 `github/master`；保留特性分支。eq_backtest 保持 `5min-old`，固定合并提交而不跟随移动分支。回滚时新建独立回测目录并设置 `optimizer.enabled: false`；若回退提交，应同时还原 pyproject.toml 和 uv.lock，不能在一个运行目录混用两种结果。
