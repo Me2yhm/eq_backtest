@@ -1056,7 +1056,9 @@ def _materialize_positions(
             how="left",
         )
         .join(
-            pool.pool_frame.select(current_bar_columns).rename({"datetime": "snapshot_bar"}),
+            pool.pool_frame.select(current_bar_columns)
+            .with_columns(pl.col("datetime").cast(records.schema["snapshot_bar"]))
+            .rename({"datetime": "snapshot_bar"}),
             on=["snapshot_bar", "symbol"],
             how="left",
         )

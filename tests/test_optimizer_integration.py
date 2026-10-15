@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 from array import array
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -86,6 +87,19 @@ def _pool(*, second_day_can_open: bool = True) -> BacktestDataset:
 
 
 class OptimizerIntegrationTests(unittest.TestCase):
+    def test_position_reporting_aligns_market_datetime_units(self) -> None:
+        pool = _pool()
+        common = dict(port_size=2, thresh_out_buffer=0, size_cut=10,
+                      close_on_size_drop=False, trade_on_next_bar=True, strict_first_bar_top_n=False,
+                      is_short=False, plot_heatmap=False, cost_per_turnover=0.0)
+        results = []
+        for unit in ("ns", "us"):
+            variant = replace(pool, pool_frame=pool.pool_frame.with_columns(
+                pl.col("datetime").cast(pl.Datetime(unit))))
+            results.append(generate_portfolio(variant, **common).positions)
+        self.assertFalse(results[0].empty)
+        pd.testing.assert_frame_equal(*results)
+
     def test_plan_close_preserves_unreleased_leases_for_explicit_retry(self) -> None:
         lease = MagicMock(released=False)
         lease.release.side_effect = [OptimizerClientError("output still referenced"), None]
