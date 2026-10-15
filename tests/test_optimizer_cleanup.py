@@ -7,8 +7,6 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-
 import optimizer_adapter as adapter
 from optimizer_client import InProcessOptimizerClient, OptimizerClientError
 import run as runner
@@ -19,19 +17,15 @@ class CleanupPriorityTests(unittest.TestCase):
     def test_target_preparation_keeps_primary_error_and_cleanup_diagnostic(self):
         primary = OptimizerClientError("original request timeout")
         with InProcessOptimizerClient() as client:
-            optimize = client.optimize
-            calls = 0
+            optimize_many = client.optimize_many
 
-            def invoke(request):
-                nonlocal calls
-                calls += 1
-                if calls == 2:
-                    raise primary
-                lease, wait = optimize(request)
-                lease._release_callback = MagicMock(side_effect=RuntimeError("release ACK lost"))
-                return lease, wait
+            def invoke(requests):
+                batch = optimize_many(requests)
+                batch._release_callback = MagicMock(side_effect=RuntimeError("release ACK lost"))
+                return batch
 
-            with patch.object(client, "optimize", side_effect=invoke):
+            with (patch.object(client, "optimize_many", side_effect=invoke),
+                  patch.object(adapter, "_append_audit", side_effect=primary)):
                 with self.assertRaises(OptimizerClientError) as caught:
                     adapter.prepare_optimizer_targets(
                         _pool(), client, portfolio_id="long:2", port_size=2,

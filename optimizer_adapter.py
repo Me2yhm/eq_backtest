@@ -130,6 +130,21 @@ def _decision_target_frame(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=_DECISION_TARGET_COLUMNS)
 
 
+def _request(context: DecisionContext, pool: BacktestDataset, *, schema_version: str,
+             port_size: int, model: dict, timeout_ms: int) -> dict:
+    return {
+        "schema_version": schema_version, "request_id": str(uuid.uuid4()),
+        "data_context": {"as_of": _iso(context.as_of),
+                         "planned_execution_at": _iso(context.planned_execution_at), "frequency": "daily"},
+        "portfolio_policy": {"long_only": True, "fully_invested": False, "allow_cash": True,
+                             "allow_leverage": False, "cash_policy": "retain",
+                             "target_budget": len(context.symbol_ids) / port_size},
+        "model": model, "universe": {"asset_ids": [_contract_symbol(pool.symbols[index])
+                                                    for index in context.symbol_ids]},
+        "constraints": [], "options": {"timeout_ms": timeout_ms, "deterministic": True},
+    }
+
+
 def _select_targets(
     pool: BacktestDataset,
     *,
@@ -251,7 +266,38 @@ def prepare_optimizer_targets(
         ).encode("utf-8")
     ).hexdigest()
 
+    weights = None
     try:
+        requests = []
+        for bar_idx, event in enumerate(events):
+            if event == TARGET:
+                context = DecisionContext(portfolio_id, _daily_timestamp(bars[bar_idx], 15),
+                                          _daily_timestamp(bars[bar_idx + 1], 9, 30), selections[bar_idx])
+                requests.append(_request(context, pool, schema_version=client.schema_version,
+                                         port_size=port_size, model=model, timeout_ms=timeout_ms))
+        try:
+            batch = client.optimize_many(requests)
+        except OptimizerClientError as exc:
+            completed = {response["request_id"]: response for response in getattr(exc, "completed_responses", ())}
+            failed_id = (exc.response or {}).get("request_id")
+            for request in requests:
+                response = completed.get(request["request_id"])
+                failed = request["request_id"] == failed_id
+                row = {"portfolio_id": portfolio_id, "request_id": request["request_id"],
+                       "decision_as_of": request["data_context"]["as_of"],
+                       "planned_execution_at": request["data_context"]["planned_execution_at"],
+                       "event": "target", "status": "feasible" if response else "failed" if failed else "not_published",
+                       "batch_complete": False, "config_signature": config_signature}
+                if failed:
+                    row.update(error=str(exc), service_status=(exc.response or {}).get("status"),
+                               errors=(exc.response or {}).get("errors", []))
+                calls.append(row)
+                _append_audit(audit_path, row)
+            _append_audit(audit_path, {"event": "batch_failure", "status": "failed", "error": str(exc),
+                                       "portfolio_id": portfolio_id, "batch_complete": False})
+            raise
+        leases.append(batch)
+        batch_index = 0
         for bar_idx, event in enumerate(events):
             selected = selections[bar_idx]
             offsets[bar_idx + 1] = offsets[bar_idx] + len(selected)
@@ -302,55 +348,16 @@ def prepare_optimizer_targets(
                 _daily_timestamp(bars[bar_idx + 1], 9, 30),
                 selected,
             )
-            request_id = str(uuid.uuid4())
+            request = requests[batch_index]
+            request_id = request["request_id"]
             target_budget = len(selected) / port_size
-            request = {
-                "schema_version": client.schema_version,
-                "request_id": request_id,
-                "data_context": {
-                    "as_of": _iso(context.as_of),
-                    "planned_execution_at": _iso(context.planned_execution_at),
-                    "frequency": "daily",
-                },
-                "portfolio_policy": {
-                    "long_only": True,
-                    "fully_invested": False,
-                    "allow_cash": True,
-                    "allow_leverage": False,
-                    "cash_policy": "retain",
-                    "target_budget": target_budget,
-                },
-                "model": model,
-                "universe": {"asset_ids": [_contract_symbol(pool.symbols[index]) for index in selected]},
-                "constraints": [],
-                "options": {"timeout_ms": timeout_ms, "deterministic": True},
-            }
             prepare_ms = (time.perf_counter_ns() - prepare_started) / 1_000_000
-            try:
-                lease, wait_ms = client.optimize(request)
-            except OptimizerClientError as exc:
-                row = {
-                    "portfolio_id": portfolio_id,
-                    "request_id": request_id,
-                    "decision_as_of": _iso(context.as_of),
-                    "planned_execution_at": _iso(context.planned_execution_at),
-                    "actual_execution_at": _iso(context.planned_execution_at),
-                    "event": "target",
-                    "status": "failed",
-                    "error": str(exc),
-                }
-                row["config_signature"] = config_signature
-                if exc.response:
-                    row["service_status"] = exc.response.get("status")
-                    row["errors"] = exc.response.get("errors", [])
-                calls.append(row)
-                _append_audit(audit_path, row)
-                raise
-            leases.append(lease)
-            assert lease.weights is not None
-            weights_by_bar.append(lease.weights)
-            response = lease.response
-            descriptor = lease.descriptor
+            weights = batch.weights_for(batch_index)
+            weights_by_bar.append(weights)
+            response = batch.responses[batch_index]
+            descriptor = response["solution"]["weights"]
+            wait_ms = batch.waits_ms[batch_index]
+            batch_index += 1
             row = {
                 "portfolio_id": portfolio_id,
                 "request_id": request_id,
@@ -367,13 +374,13 @@ def prepare_optimizer_targets(
                 "service_epoch": client.service_epoch,
                 "buffer_id": descriptor["buffer_id"],
                 "generation": descriptor["generation"],
-                "shared_bytes": lease.shared_bytes,
+                "shared_bytes": descriptor["nbytes"] if batch.transport == "shared_memory" else 0,
                 "staging_bytes": response.get("diagnostics", {}).get("staging_bytes", 0),
-                "copy_bytes": lease.copy_bytes,
+                "copy_bytes": batch.copy_bytes,
                 "wait_ms": wait_ms,
                 "audit_materialization_bytes": descriptor["nbytes"],
                 "prepare_ms": prepare_ms,
-                "mapping_validation_ms": lease.mapping_validation_ms,
+                "mapping_validation_ms": batch.mapping_validation_ms if batch_index == 1 else 0.0,
                 "model_time_ms": response.get("diagnostics", {}).get("model_time_ms"),
                 "target_count": len(selected),
                 "portfolio_size": port_size,
@@ -383,7 +390,7 @@ def prepare_optimizer_targets(
             }
             calls.append(row)
             _append_audit(audit_path, row)
-            for symbol_id, weight in zip(selected, lease.weights):
+            for symbol_id, weight in zip(selected, weights):
                 target_rows.append({
                     "portfolio_id": portfolio_id,
                     "request_id": request_id,
@@ -407,7 +414,7 @@ def prepare_optimizer_targets(
             _decision_target_frame(target_rows),
         )
         # Drop the local Numba list too before closing mmap-backed leases.
-        weights_by_bar = None
+        weights_by_bar = weights = None
         close_optimizer_plan(plan, primary)
         raise
 

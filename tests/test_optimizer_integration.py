@@ -370,17 +370,18 @@ optimizer:
                         plan.close()
 
                     before_fds = len(os.listdir("/proc/self/fd"))
-                    original = client.optimize
+                    original = client._round_trip
                     attempts = 0
 
                     def fail_second_request(payload):
                         nonlocal attempts
-                        attempts += 1
-                        if attempts == 2:
-                            raise OptimizerClientError("injected second request failure")
+                        if payload["type"] == "OPTIMIZE_INTO_ARENA":
+                            attempts += 1
+                            if attempts == 2:
+                                raise OptimizerClientError("injected second request failure")
                         return original(payload)
 
-                    with patch.object(client, "optimize", side_effect=fail_second_request):
+                    with patch.object(client, "_round_trip", side_effect=fail_second_request):
                         with self.assertRaisesRegex(OptimizerClientError, "injected second request failure"):
                             prepare_optimizer_targets(
                                 _pool(), client, portfolio_id="long:2", port_size=2,
@@ -389,7 +390,12 @@ optimizer:
                                 timeout_ms=5000,
                             )
                     self.assertEqual(attempts, 2)
-                    self.assertEqual(len(os.listdir("/proc/self/fd")), before_fds)
+                    deadline = time.monotonic() + 2
+                    # The client abandons the connection; wait for the independent
+                    # service to observe EOF and release its unpublished arena.
+                    while len(os.listdir("/proc/self/fd")) > before_fds and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertLessEqual(len(os.listdir("/proc/self/fd")), before_fds)
             finally:
                 process.terminate()
                 process.wait(timeout=5)
