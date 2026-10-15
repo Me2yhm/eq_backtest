@@ -336,7 +336,7 @@ requires-dist = [
     { name = "numba" },
     { name = "numpy" },
     { name = "openpyxl", specifier = ">=3.1" },
-    { name = "optimizer", git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=f80f5b7bdd2841ecadf064688b842ab66f5031d2" },
+    { name = "optimizer", git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=3ca073335b40d54e7396d258c42470dec96a4c42" },
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow", specifier = ">=23.0.1" },
@@ -941,7 +941,7 @@ wheels = [
 [[package]]
 name = "optimizer"
 version = "0.2.0"
-source = { git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=f80f5b7bdd2841ecadf064688b842ab66f5031d2#f80f5b7bdd2841ecadf064688b842ab66f5031d2" }
+source = { git = "ssh://git@github.com/Me2yhm/optimizer.git?rev=3ca073335b40d54e7396d258c42470dec96a4c42#3ca073335b40d54e7396d258c42470dec96a4c42" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.11'" },
