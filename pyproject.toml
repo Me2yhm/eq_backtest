@@ -27,3 +27,8 @@ url = "https://mirrors.aliyun.com/pypi/simple"
 members = [
     "backtest_verify",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.0",
+]
