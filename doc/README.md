@@ -276,6 +276,15 @@ invalid weights, and late-session identity all fail the experiment with zero
 retry and no HTTP fallback. In-process mode validates the same logical contract
 without socket, memfd, or service lifecycle overhead.
 
+Daily targets are submitted through the backend-neutral `optimize_many` API.
+SHM mode requires explicit `output_arena/1` capability negotiation and retains
+one shared output arena for each portfolio simulation. Each decision reads a
+contiguous read-only view; no numeric result is copied into a client heap array.
+The arena is published only after all requests succeed and is released after
+Numba drops its views. Its required bytes must fit `max_shared_bytes` on both
+sides; insufficient capacity reports required/allowed bytes and fails the run.
+This bounds FD and mmap counts independently of the number of decision days.
+
 Successful service runs additionally write `optimizer_calls.jsonl` and
 `decision_targets.parquet` in the mode output directory. Calls include skipped
 events, request/session/epoch/buffer identity, decision and planned execution
@@ -285,6 +294,10 @@ the two are intentionally not collapsed.
 The run directory also receives `optimizer_run_status.json`; service/config/data
 failures leave it as `failed` with `complete: false`, and no successful summary
 is fabricated from partially written outputs.
+The primary request or simulation error remains the raised error. Cleanup
+failures are recorded separately in `cleanup_errors` and `cleanup_status`; if
+cleanup alone fails, the run fails explicitly. Long buy priority uses the
+signal-bar prediction, including when execution cash cannot fund all targets.
 
 With the service running, a synthetic latency/copy audit can be repeated without
 production data:
@@ -307,8 +320,17 @@ RUN_OPTIMIZER_IPC_TESTS=1 uv run python -m unittest discover -s tests -v
 
 The verification directory must be new. It retains the synthetic fixture, each
 backend's `config.yml`, service/run logs, output files, and `comparison.json`.
-The current dual-mode acceptance record is
-[OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md](OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md).
+The 2,000-decision-day comparison additionally samples both process FD/RSS/mmap
+peaks under `RLIMIT_NOFILE=256`:
+
+```bash
+uv run python scripts/verify_optimizer_pressure.py long-cli --work-dir /tmp/eq-long-verification --nofile 256
+```
+
+The current review rework record is
+[OPTIMIZER_REWORK_VERIFICATION_20261015.md](OPTIMIZER_REWORK_VERIFICATION_20261015.md).
+[OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md](OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md)
+preserves the initial short-sample acceptance evidence.
 [OPTIMIZER_VERIFICATION_V0.2.md](OPTIMIZER_VERIFICATION_V0.2.md) is the earlier SHM-only record.
 
 ### Securities borrowing (SBL)

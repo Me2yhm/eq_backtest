@@ -1,0 +1,2122 @@
+{
+  "date": "2026-10-15",
+  "timezone": "Asia/Shanghai",
+  "status": "implementation and local acceptance passed; eq CI authorization limitation accepted; PR open",
+  "baselines": {
+    "optimizer": "988a1381f0030d93870c36cacddf71efc1815d3f",
+    "eq_backtest": "4d131d6073187bdee3f69e94e0303f3af02b2e05"
+  },
+  "optimizer_commit": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+  "eq_runtime_commit": "62557430afb9003a53c6a3185d7b0746c7341843",
+  "remote": "github",
+  "optimizer_branch": "fix/shm-arena-contract-hardening",
+  "eq_branch": "5min-old",
+  "pull_request": "https://github.com/Me2yhm/optimizer/pull/2",
+  "versions": [
+    {
+      "environment": {
+        "python": "3.10.21",
+        "numpy": "2.2.6",
+        "numba": "0.65.0",
+        "polars": "1.39.3",
+        "pandas": "2.3.3",
+        "optimizer_file": "/tmp/eq-rework-final-py310/lib/python3.10/site-packages/optimizer/__init__.py",
+        "source": {
+          "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+          "vcs_info": {
+            "vcs": "git",
+            "commit_id": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+            "requested_revision": "f80f5b7bdd2841ecadf064688b842ab66f5031d2"
+          }
+        }
+      },
+      "optimizer_environment": {
+        "python": "3.10.21",
+        "numpy": "2.2.6",
+        "optimizer_file": "/home/yhm/optimizer/optimizer/__init__.py"
+      },
+      "eq_backtest": {
+        "tests": 50,
+        "seconds": 22.796,
+        "skips": 0,
+        "log": "/tmp/eq-rework-py310-f80f5b7-tests.log"
+      },
+      "optimizer": {
+        "tests": 56,
+        "seconds": 9.602,
+        "skips": 0,
+        "log": "/tmp/optimizer-rework-py310-371bc69-tests.log"
+      },
+      "wheel_smoke": {
+        "status": "passed",
+        "python": "3.10.21",
+        "numpy": "2.2.6",
+        "package": "/tmp/optimizer-rework-final-wheel310/lib/python3.10/site-packages/optimizer/__init__.py",
+        "version": "0.2.0"
+      }
+    },
+    {
+      "environment": {
+        "python": "3.11.9",
+        "numpy": "2.4.4",
+        "numba": "0.65.0",
+        "polars": "1.39.3",
+        "pandas": "3.0.1",
+        "optimizer_file": "/tmp/eq-rework-final-py311/lib/python3.11/site-packages/optimizer/__init__.py",
+        "source": {
+          "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+          "vcs_info": {
+            "vcs": "git",
+            "commit_id": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+            "requested_revision": "f80f5b7bdd2841ecadf064688b842ab66f5031d2"
+          }
+        }
+      },
+      "optimizer_environment": {
+        "python": "3.11.9",
+        "numpy": "2.4.6",
+        "optimizer_file": "/home/yhm/optimizer/optimizer/__init__.py"
+      },
+      "eq_backtest": {
+        "tests": 50,
+        "seconds": 25.169,
+        "skips": 0,
+        "log": "/tmp/eq-rework-py311-f80f5b7-tests.log"
+      },
+      "optimizer": {
+        "tests": 56,
+        "seconds": 9.704,
+        "skips": 0,
+        "log": "/tmp/optimizer-rework-py311-371bc69-tests.log"
+      },
+      "wheel_smoke": {
+        "status": "passed",
+        "python": "3.11.9",
+        "numpy": "2.4.6",
+        "package": "/tmp/optimizer-rework-final-wheel311/lib/python3.11/site-packages/optimizer/__init__.py",
+        "version": "0.2.0"
+      }
+    },
+    {
+      "environment": {
+        "python": "3.14.3",
+        "numpy": "2.4.4",
+        "numba": "0.65.0",
+        "polars": "1.39.3",
+        "pandas": "3.0.1",
+        "optimizer_file": "/tmp/eq-rework-frozen-f80f5b7/lib/python3.14/site-packages/optimizer/__init__.py",
+        "source": {
+          "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+          "vcs_info": {
+            "vcs": "git",
+            "commit_id": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+            "requested_revision": "f80f5b7bdd2841ecadf064688b842ab66f5031d2"
+          }
+        }
+      },
+      "optimizer_environment": {
+        "python": "3.14.3",
+        "numpy": "2.5.2",
+        "optimizer_file": "/home/yhm/optimizer/optimizer/__init__.py"
+      },
+      "eq_backtest": {
+        "tests": 50,
+        "seconds": 22.71,
+        "skips": 0,
+        "log": "/tmp/eq-rework-f80f5b7-tests.log"
+      },
+      "optimizer": {
+        "tests": 56,
+        "seconds": 9.642,
+        "skips": 0,
+        "log": "/tmp/optimizer-rework-py314-371bc69-tests.log"
+      },
+      "wheel_smoke": {
+        "status": "passed",
+        "python": "3.14.3",
+        "numpy": "2.5.4",
+        "package": "/tmp/optimizer-rework-final-wheel314/lib/python3.14/site-packages/optimizer/__init__.py",
+        "version": "0.2.0"
+      }
+    }
+  ],
+  "github_ci": {
+    "url": "https://github.com/Me2yhm/optimizer/actions/runs/38693488208",
+    "commit": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 116284571292,
+        "name": "linux (3.14)",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 38693488208,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Install locked dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Record environment and test Core and SHM",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "Build and test installed wheel outside checkout",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13
+          }
+        ]
+      },
+      {
+        "id": 116284571431,
+        "name": "linux (3.11)",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 38693488208,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Install locked dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Record environment and test Core and SHM",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "Build and test installed wheel outside checkout",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13
+          }
+        ]
+      },
+      {
+        "id": 116284571461,
+        "name": "linux (3.10)",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 38693488208,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Install locked dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Record environment and test Core and SHM",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "Build and test installed wheel outside checkout",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13
+          }
+        ]
+      }
+    ],
+    "verified_interpreter_logs": [
+      {
+        "id": 116284571461,
+        "lines": [
+          "2026-10-15T06:37:20.7927054Z 3.10.22 (main, Oct  1 2026, 14:30:20) [GCC 13.3.0]",
+          "2026-10-15T06:37:31.0373238Z Ran 56 tests in 9.689s",
+          "2026-10-15T06:37:34.3732908Z   \"python\": \"3.10.22\",",
+          "2026-10-15T06:37:34.3733527Z   \"numpy\": \"2.2.6\","
+        ]
+      },
+      {
+        "id": 116284571431,
+        "lines": [
+          "2026-10-15T06:37:19.9989566Z 3.11.17 (main, Oct  1 2026, 14:32:31) [GCC 13.3.0]",
+          "2026-10-15T06:37:29.9181623Z Ran 56 tests in 9.491s",
+          "2026-10-15T06:37:32.3981723Z   \"python\": \"3.11.17\",",
+          "2026-10-15T06:37:32.3982057Z   \"numpy\": \"2.4.6\","
+        ]
+      },
+      {
+        "id": 116284571292,
+        "lines": [
+          "2026-10-15T06:37:24.1994119Z 3.14.8 (main, Oct  1 2026, 02:38:33) [GCC 13.3.0]",
+          "2026-10-15T06:37:34.6796587Z Ran 56 tests in 9.721s",
+          "2026-10-15T06:37:40.9673708Z   \"python\": \"3.14.8\",",
+          "2026-10-15T06:37:40.9679510Z   \"numpy\": \"2.5.4\","
+        ]
+      }
+    ],
+    "eq_backtest": {
+      "url": "https://github.com/Me2yhm/eq_backtest/actions/runs/38692763019",
+      "conclusion": "failure",
+      "tests_executed": false,
+      "reason": "OPTIMIZER_READ_TOKEN missing for private optimizer repository",
+      "user_decision": "record authorization limitation this round"
+    }
+  },
+  "review": {
+    "status": "no blocking findings",
+    "independent_review": true,
+    "optimizer_range": "988a138..f80f5b7",
+    "eq_range": "4d131d6..6255743",
+    "followup_findings_fixed": [
+      "non-list empty batch",
+      "audit materialization cleanup",
+      "duplicate cleanup-only diagnostics",
+      "pre-3.14 locals snapshot retaining view",
+      "timestamp join units",
+      "CI matrix interpreter selection"
+    ],
+    "github_human_approval": "pending; no merge authorized"
+  },
+  "runtime_identity": "371bc69 and final f80f5b7 are byte-identical for optimizer modules, pyproject, tests and install verifier; only workflow differs",
+  "package_artifacts": [
+    {
+      "path": "/tmp/optimizer-rework-dist-f80f5b7/optimizer-0.2.0-py3-none-any.whl",
+      "sha256": "67a917f83641fefa6a0e52793b42a854fb2355a0af175b07e92deedc29c5cdcd"
+    },
+    {
+      "path": "/tmp/optimizer-rework-dist-f80f5b7/optimizer-0.2.0.tar.gz",
+      "sha256": "27fd5da29cde0189bfc74fd3348a60e932279ee08c6aa1463f2738f30eb7e068"
+    }
+  ],
+  "package_modules_compared": 17,
+  "old_client_compatibility": {
+    "status": "passed",
+    "old_client_source": {
+      "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "988a1381f0030d93870c36cacddf71efc1815d3f",
+        "requested_revision": "988a1381f0030d93870c36cacddf71efc1815d3f"
+      }
+    },
+    "new_service_commit": "f80f5b7bdd2841ecadf064688b842ab66f5031d2"
+  },
+  "r1_causality": {
+    "before": [
+      {
+        "external": false,
+        "mutation": "baseline",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": false,
+        "mutation": "reversed",
+        "actual": {
+          "B": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": -0.05
+      },
+      {
+        "external": false,
+        "mutation": "one_nan",
+        "actual": {
+          "B": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": -0.05
+      },
+      {
+        "external": false,
+        "mutation": "all_nan",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": false,
+        "mutation": "missing_prediction_row",
+        "actual": {
+          "B": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": -0.05
+      },
+      {
+        "external": false,
+        "mutation": "tied",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "baseline",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "reversed",
+        "actual": {
+          "B": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": -0.05
+      },
+      {
+        "external": true,
+        "mutation": "one_nan",
+        "actual": {
+          "B": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": -0.05
+      },
+      {
+        "external": true,
+        "mutation": "all_nan",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "missing_prediction_row",
+        "actual": {
+          "B": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": -0.05
+      },
+      {
+        "external": true,
+        "mutation": "tied",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      }
+    ],
+    "after": [
+      {
+        "external": false,
+        "mutation": "baseline",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": false,
+        "mutation": "reversed",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": false,
+        "mutation": "one_nan",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": false,
+        "mutation": "all_nan",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": false,
+        "mutation": "missing_prediction_row",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": false,
+        "mutation": "tied",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "baseline",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "reversed",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "one_nan",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "all_nan",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "missing_prediction_row",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      },
+      {
+        "external": true,
+        "mutation": "tied",
+        "actual": {
+          "A": 0.5,
+          "C": 0.5
+        },
+        "target": {
+          "A": 0.5,
+          "B": 0.5
+        },
+        "cash_weight": 0.0,
+        "last_return": 0.05
+      }
+    ]
+  },
+  "r2_original_resource_curve": {
+    "experiment": "one retained legacy SHM lease per request",
+    "nofile": 256,
+    "environment": {
+      "python": "3.14.3",
+      "kernel": "4.18.0-348.7.1.el8_5.x86_64"
+    },
+    "status": "resource_limit_reproduced",
+    "runs": [
+      {
+        "requested": 10,
+        "completed": 10,
+        "rlimit_nofile": [
+          256,
+          262144
+        ],
+        "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+        "python": "3.14.3",
+        "baseline_client": {
+          "pid": 1967608,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38600
+        },
+        "baseline_service": {
+          "pid": 1967539,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38736
+        },
+        "peak_client": {
+          "fd": 27,
+          "maps": 225,
+          "optimizer_maps": 10,
+          "optimizer_mapped_bytes": 40960,
+          "rss_kib": 39372
+        },
+        "peak_service": {
+          "fd": 27,
+          "maps": 230,
+          "optimizer_maps": 10,
+          "optimizer_mapped_bytes": 40960,
+          "rss_kib": 39344
+        },
+        "curve": [
+          {
+            "outputs": 1,
+            "client": {
+              "pid": 1967608,
+              "fd": 9,
+              "maps": 216,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 38804
+            },
+            "service": {
+              "pid": 1967539,
+              "fd": 9,
+              "maps": 221,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 38760
+            }
+          },
+          {
+            "outputs": 10,
+            "client": {
+              "pid": 1967608,
+              "fd": 27,
+              "maps": 225,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 39372
+            },
+            "service": {
+              "pid": 1967539,
+              "fd": 27,
+              "maps": 230,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 39344
+            }
+          }
+        ],
+        "cleanup_errors": [],
+        "status": "passed",
+        "final_client": {
+          "pid": 1967608,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 39108
+        },
+        "final_service": {
+          "pid": 1967539,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 39376
+        },
+        "external_monitor": {
+          "client": {
+            "fd": 22,
+            "maps": 224,
+            "optimizer_maps": 8,
+            "optimizer_mapped_bytes": 32768,
+            "rss_kib": 39336
+          },
+          "service": {
+            "fd": 25,
+            "maps": 229,
+            "optimizer_maps": 9,
+            "optimizer_mapped_bytes": 36864,
+            "rss_kib": 39376
+          },
+          "sample_interval_seconds": 0.005,
+          "samples": 27
+        },
+        "service_after_client_exit": {
+          "pid": 1967539,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 39376
+        },
+        "service_exit": 0,
+        "socket_residual": false
+      },
+      {
+        "requested": 100,
+        "completed": 100,
+        "rlimit_nofile": [
+          256,
+          262144
+        ],
+        "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+        "python": "3.14.3",
+        "baseline_client": {
+          "pid": 1967739,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 36592
+        },
+        "baseline_service": {
+          "pid": 1967675,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38772
+        },
+        "peak_client": {
+          "fd": 207,
+          "maps": 315,
+          "optimizer_maps": 100,
+          "optimizer_mapped_bytes": 409600,
+          "rss_kib": 42124
+        },
+        "peak_service": {
+          "fd": 207,
+          "maps": 320,
+          "optimizer_maps": 100,
+          "optimizer_mapped_bytes": 409600,
+          "rss_kib": 40108
+        },
+        "curve": [
+          {
+            "outputs": 1,
+            "client": {
+              "pid": 1967739,
+              "fd": 9,
+              "maps": 216,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 36860
+            },
+            "service": {
+              "pid": 1967675,
+              "fd": 9,
+              "maps": 221,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 38796
+            }
+          },
+          {
+            "outputs": 10,
+            "client": {
+              "pid": 1967739,
+              "fd": 27,
+              "maps": 225,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 37488
+            },
+            "service": {
+              "pid": 1967675,
+              "fd": 27,
+              "maps": 230,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 39444
+            }
+          },
+          {
+            "outputs": 100,
+            "client": {
+              "pid": 1967739,
+              "fd": 207,
+              "maps": 315,
+              "optimizer_maps": 100,
+              "optimizer_mapped_bytes": 409600,
+              "rss_kib": 42124
+            },
+            "service": {
+              "pid": 1967675,
+              "fd": 207,
+              "maps": 320,
+              "optimizer_maps": 100,
+              "optimizer_mapped_bytes": 409600,
+              "rss_kib": 40108
+            }
+          }
+        ],
+        "cleanup_errors": [],
+        "status": "passed",
+        "final_client": {
+          "pid": 1967739,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 37780
+        },
+        "final_service": {
+          "pid": 1967675,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 39776
+        },
+        "external_monitor": {
+          "client": {
+            "fd": 204,
+            "maps": 315,
+            "optimizer_maps": 99,
+            "optimizer_mapped_bytes": 405504,
+            "rss_kib": 42124
+          },
+          "service": {
+            "fd": 207,
+            "maps": 320,
+            "optimizer_maps": 100,
+            "optimizer_mapped_bytes": 409600,
+            "rss_kib": 40108
+          },
+          "sample_interval_seconds": 0.005,
+          "samples": 54
+        },
+        "service_after_client_exit": {
+          "pid": 1967675,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 39776
+        },
+        "service_exit": 0,
+        "socket_residual": false
+      },
+      {
+        "requested": 1000,
+        "completed": 124,
+        "rlimit_nofile": [
+          256,
+          262144
+        ],
+        "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+        "python": "3.14.3",
+        "baseline_client": {
+          "pid": 1967884,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 36668
+        },
+        "baseline_service": {
+          "pid": 1967820,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 35772
+        },
+        "peak_client": {
+          "fd": 255,
+          "maps": 340,
+          "optimizer_maps": 124,
+          "optimizer_mapped_bytes": 507904,
+          "rss_kib": 43580
+        },
+        "peak_service": {
+          "fd": 255,
+          "maps": 344,
+          "optimizer_maps": 124,
+          "optimizer_mapped_bytes": 507904,
+          "rss_kib": 38240
+        },
+        "curve": [
+          {
+            "outputs": 1,
+            "client": {
+              "pid": 1967884,
+              "fd": 9,
+              "maps": 216,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 36868
+            },
+            "service": {
+              "pid": 1967820,
+              "fd": 9,
+              "maps": 221,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 36732
+            }
+          },
+          {
+            "outputs": 10,
+            "client": {
+              "pid": 1967884,
+              "fd": 27,
+              "maps": 225,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 37420
+            },
+            "service": {
+              "pid": 1967820,
+              "fd": 27,
+              "maps": 230,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 37380
+            }
+          },
+          {
+            "outputs": 100,
+            "client": {
+              "pid": 1967884,
+              "fd": 207,
+              "maps": 315,
+              "optimizer_maps": 100,
+              "optimizer_mapped_bytes": 409600,
+              "rss_kib": 41836
+            },
+            "service": {
+              "pid": 1967820,
+              "fd": 207,
+              "maps": 320,
+              "optimizer_maps": 100,
+              "optimizer_mapped_bytes": 409600,
+              "rss_kib": 38048
+            }
+          },
+          {
+            "outputs": 124,
+            "client": {
+              "pid": 1967884,
+              "fd": 255,
+              "maps": 340,
+              "optimizer_maps": 124,
+              "optimizer_mapped_bytes": 507904,
+              "rss_kib": 43648
+            },
+            "service": {
+              "pid": 1967820,
+              "fd": 255,
+              "maps": 344,
+              "optimizer_maps": 124,
+              "optimizer_mapped_bytes": 507904,
+              "rss_kib": 38252
+            }
+          }
+        ],
+        "cleanup_errors": [],
+        "status": "failed",
+        "error_type": "_RequestRejected",
+        "error": "optimizer rejected the request",
+        "traceback": "Traceback (most recent call last):\n  File \"/home/yhm/eq-backtest/scripts/verify_optimizer_pressure.py\", line 94, in _retained_worker\n    lease, _ = client.optimize(_request(index))\n               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/transport/shm/client.py\", line 189, in optimize\n    return self._optimize(request)\n           ~~~~~~~~~~~~~~^^^^^^^^^\n  File \"/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/transport/shm/client.py\", line 225, in _optimize\n    raise _RequestRejected(\"optimizer rejected the request\", response)\noptimizer.transport.shm.client._RequestRejected: optimizer rejected the request\n",
+        "final_client": {
+          "pid": 1967884,
+          "fd": 6,
+          "maps": 216,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 43280
+        },
+        "final_service": {
+          "pid": 1967820,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 37968
+        },
+        "external_monitor": {
+          "client": {
+            "fd": 254,
+            "maps": 341,
+            "optimizer_maps": 124,
+            "optimizer_mapped_bytes": 507904,
+            "rss_kib": 43648
+          },
+          "service": {
+            "fd": 255,
+            "maps": 344,
+            "optimizer_maps": 124,
+            "optimizer_mapped_bytes": 507904,
+            "rss_kib": 38276
+          },
+          "sample_interval_seconds": 0.005,
+          "samples": 63
+        },
+        "service_after_client_exit": {
+          "pid": 1967820,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 37968
+        },
+        "service_exit": 0,
+        "socket_residual": false
+      },
+      {
+        "requested": 2000,
+        "completed": 124,
+        "rlimit_nofile": [
+          256,
+          262144
+        ],
+        "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+        "python": "3.14.3",
+        "baseline_client": {
+          "pid": 1968017,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38476
+        },
+        "baseline_service": {
+          "pid": 1967951,
+          "fd": 6,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38896
+        },
+        "peak_client": {
+          "fd": 255,
+          "maps": 339,
+          "optimizer_maps": 124,
+          "optimizer_mapped_bytes": 507904,
+          "rss_kib": 45384
+        },
+        "peak_service": {
+          "fd": 255,
+          "maps": 344,
+          "optimizer_maps": 124,
+          "optimizer_mapped_bytes": 507904,
+          "rss_kib": 40432
+        },
+        "curve": [
+          {
+            "outputs": 1,
+            "client": {
+              "pid": 1968017,
+              "fd": 9,
+              "maps": 216,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 38672
+            },
+            "service": {
+              "pid": 1967951,
+              "fd": 9,
+              "maps": 221,
+              "optimizer_maps": 1,
+              "optimizer_mapped_bytes": 4096,
+              "rss_kib": 38924
+            }
+          },
+          {
+            "outputs": 10,
+            "client": {
+              "pid": 1968017,
+              "fd": 27,
+              "maps": 225,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 39228
+            },
+            "service": {
+              "pid": 1967951,
+              "fd": 27,
+              "maps": 230,
+              "optimizer_maps": 10,
+              "optimizer_mapped_bytes": 40960,
+              "rss_kib": 39572
+            }
+          },
+          {
+            "outputs": 100,
+            "client": {
+              "pid": 1968017,
+              "fd": 207,
+              "maps": 315,
+              "optimizer_maps": 100,
+              "optimizer_mapped_bytes": 409600,
+              "rss_kib": 43644
+            },
+            "service": {
+              "pid": 1967951,
+              "fd": 207,
+              "maps": 320,
+              "optimizer_maps": 100,
+              "optimizer_mapped_bytes": 409600,
+              "rss_kib": 40236
+            }
+          },
+          {
+            "outputs": 124,
+            "client": {
+              "pid": 1968017,
+              "fd": 255,
+              "maps": 340,
+              "optimizer_maps": 124,
+              "optimizer_mapped_bytes": 507904,
+              "rss_kib": 45448
+            },
+            "service": {
+              "pid": 1967951,
+              "fd": 255,
+              "maps": 344,
+              "optimizer_maps": 124,
+              "optimizer_mapped_bytes": 507904,
+              "rss_kib": 40444
+            }
+          }
+        ],
+        "cleanup_errors": [],
+        "status": "failed",
+        "error_type": "_RequestRejected",
+        "error": "optimizer rejected the request",
+        "traceback": "Traceback (most recent call last):\n  File \"/home/yhm/eq-backtest/scripts/verify_optimizer_pressure.py\", line 94, in _retained_worker\n    lease, _ = client.optimize(_request(index))\n               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/transport/shm/client.py\", line 189, in optimize\n    return self._optimize(request)\n           ~~~~~~~~~~~~~~^^^^^^^^^\n  File \"/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/transport/shm/client.py\", line 225, in _optimize\n    raise _RequestRejected(\"optimizer rejected the request\", response)\noptimizer.transport.shm.client._RequestRejected: optimizer rejected the request\n",
+        "final_client": {
+          "pid": 1968017,
+          "fd": 6,
+          "maps": 216,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 45080
+        },
+        "final_service": {
+          "pid": 1967951,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 40160
+        },
+        "external_monitor": {
+          "client": {
+            "fd": 254,
+            "maps": 340,
+            "optimizer_maps": 124,
+            "optimizer_mapped_bytes": 507904,
+            "rss_kib": 45468
+          },
+          "service": {
+            "fd": 255,
+            "maps": 343,
+            "optimizer_maps": 124,
+            "optimizer_mapped_bytes": 507904,
+            "rss_kib": 40484
+          },
+          "sample_interval_seconds": 0.005,
+          "samples": 61
+        },
+        "service_after_client_exit": {
+          "pid": 1967951,
+          "fd": 6,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 40160
+        },
+        "service_exit": 0,
+        "socket_residual": false
+      }
+    ]
+  },
+  "r2_final_long_cli": {
+    "experiment": "real CLI long-horizon parity",
+    "target_days": 2000,
+    "market_days": 2043,
+    "nofile": 256,
+    "expected_events": {
+      "target": 2000,
+      "no_signal": 21,
+      "liquidate": 21
+    },
+    "max_shared_bytes": null,
+    "environment": {
+      "python": "3.14.3",
+      "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+      "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+      "dependencies": {
+        "numpy": "2.4.4",
+        "numba": "0.65.0",
+        "pandas": "3.0.1",
+        "polars": "1.39.3"
+      },
+      "installed_source": {
+        "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+          "requested_revision": "f80f5b7bdd2841ecadf064688b842ab66f5031d2"
+        }
+      }
+    },
+    "runs": {
+      "inprocess": {
+        "returncode": 0,
+        "elapsed_seconds": 3.9435256831347942,
+        "peaks": {
+          "client": {
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 774,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 567972
+          },
+          "service": {
+            "fd": 6,
+            "optimizer_fds": 0,
+            "maps": 215,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 37472
+          },
+          "samples": 674,
+          "sample_interval_seconds": 0.005
+        },
+        "run_status": {
+          "status": "success",
+          "complete": true
+        },
+        "child_resources": {
+          "baseline": {
+            "pid": 2135168,
+            "fd": 5,
+            "optimizer_fds": 0,
+            "maps": 46,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 20072
+          },
+          "rlimit_nofile": [
+            256,
+            262144
+          ],
+          "final": {
+            "pid": 2135168,
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 773,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 523956
+          }
+        },
+        "service_cleanup_wait_seconds": 0.00033763423562049866,
+        "service_after_client_exit": {
+          "pid": 2135101,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 37472
+        },
+        "output_files": [
+          "output_long_10_daily/cumrets_10_TEST.csv",
+          "output_long_10_daily/decision_targets.parquet",
+          "output_long_10_daily/metrics_10_TEST.csv",
+          "output_long_10_daily/optimizer_calls.jsonl",
+          "output_long_10_daily/portfolio_pnl_4.csv",
+          "output_long_10_daily/positions_4.csv",
+          "output_long_10_daily/returns_10_TEST.csv",
+          "output_long_10_daily/target_weights_4.csv",
+          "output_long_10_daily/target_weights_4.parquet"
+        ],
+        "metrics_files": [
+          "output_long_10_daily/metrics_10_TEST.csv"
+        ]
+      },
+      "shared_memory": {
+        "returncode": 0,
+        "elapsed_seconds": 4.117919720709324,
+        "peaks": {
+          "client": {
+            "fd": 12,
+            "optimizer_fds": 2,
+            "maps": 754,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 65536,
+            "rss_kib": 569248
+          },
+          "service": {
+            "fd": 9,
+            "optimizer_fds": 2,
+            "maps": 221,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 65536,
+            "rss_kib": 38596
+          },
+          "samples": 702,
+          "sample_interval_seconds": 0.005
+        },
+        "run_status": {
+          "status": "success",
+          "complete": true
+        },
+        "child_resources": {
+          "baseline": {
+            "pid": 2135755,
+            "fd": 5,
+            "optimizer_fds": 0,
+            "maps": 46,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 20076
+          },
+          "rlimit_nofile": [
+            256,
+            262144
+          ],
+          "final": {
+            "pid": 2135755,
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 753,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 525308
+          }
+        },
+        "service_cleanup_wait_seconds": 0.0003249049186706543,
+        "service_after_client_exit": {
+          "pid": 2135101,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38596
+        },
+        "output_files": [
+          "output_long_10_daily/cumrets_10_TEST.csv",
+          "output_long_10_daily/decision_targets.parquet",
+          "output_long_10_daily/metrics_10_TEST.csv",
+          "output_long_10_daily/optimizer_calls.jsonl",
+          "output_long_10_daily/portfolio_pnl_4.csv",
+          "output_long_10_daily/positions_4.csv",
+          "output_long_10_daily/returns_10_TEST.csv",
+          "output_long_10_daily/target_weights_4.csv",
+          "output_long_10_daily/target_weights_4.parquet"
+        ],
+        "metrics_files": [
+          "output_long_10_daily/metrics_10_TEST.csv"
+        ]
+      }
+    },
+    "status": "passed",
+    "service_baseline": {
+      "pid": 2135101,
+      "fd": 6,
+      "optimizer_fds": 0,
+      "maps": 215,
+      "optimizer_maps": 0,
+      "optimizer_mapped_bytes": 0,
+      "rss_kib": 37472
+    },
+    "comparison": {
+      "compared_files": [
+        "cumrets_10_TEST.csv",
+        "decision_targets.parquet",
+        "metrics_10_TEST.csv",
+        "portfolio_pnl_4.csv",
+        "positions_4.csv",
+        "returns_10_TEST.csv",
+        "target_weights_4.csv",
+        "target_weights_4.parquet"
+      ],
+      "events": {
+        "target": 2000,
+        "no_signal": 21,
+        "liquidate": 21
+      },
+      "decision_rows": 7937,
+      "max_weight_abs_error": 0.0,
+      "max_daily_return_abs_error": 0.0,
+      "max_cash_weight_abs_error": 0.0
+    },
+    "service_exit": 0,
+    "socket_residual": false
+  },
+  "short_cli": {
+    "compared_files": [
+      "cumrets_10_TEST.csv",
+      "decision_targets.parquet",
+      "metrics_10_TEST.csv",
+      "portfolio_pnl_1.csv",
+      "portfolio_pnl_2.csv",
+      "portfolio_pnl_4.csv",
+      "portfolio_pnl_8.csv",
+      "positions_1.csv",
+      "positions_2.csv",
+      "positions_4.csv",
+      "positions_8.csv",
+      "returns_10_TEST.csv",
+      "target_weights_1.csv",
+      "target_weights_1.parquet",
+      "target_weights_2.csv",
+      "target_weights_2.parquet",
+      "target_weights_4.csv",
+      "target_weights_4.parquet",
+      "target_weights_8.csv",
+      "target_weights_8.parquet"
+    ],
+    "business_events": 44,
+    "decision_rows": 81,
+    "portfolio_sizes": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "max_weight_abs_error": 0.0,
+    "max_daily_return_abs_error": 0.0,
+    "max_cash_weight_abs_error": 0.0,
+    "events": [
+      "liquidate",
+      "no_signal",
+      "target"
+    ],
+    "normalized_fields": [
+      "buffer_id",
+      "config_signature",
+      "copy_bytes",
+      "generation",
+      "mapping_validation_ms",
+      "model_time_ms",
+      "prepare_ms",
+      "protocol_version",
+      "request_id",
+      "service_epoch",
+      "session_id",
+      "shared_bytes",
+      "staging_bytes",
+      "wait_ms"
+    ],
+    "signature_rule": "SHA256 of business settings plus protocol_version; protocol differs by backend",
+    "status": "passed",
+    "seed": 20261015,
+    "failed_runs_incomplete": true
+  },
+  "short_cli_evidence_commit": "371bc69fb8466cf16600a6d8137081b230591e65",
+  "capacity_failure": {
+    "experiment": "real CLI long-horizon parity",
+    "target_days": 2000,
+    "market_days": 2043,
+    "nofile": 256,
+    "expected_events": {
+      "target": 2000,
+      "no_signal": 21,
+      "liquidate": 21
+    },
+    "max_shared_bytes": 64,
+    "environment": {
+      "python": "3.14.3",
+      "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+      "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+      "dependencies": {
+        "numpy": "2.4.4",
+        "numba": "0.65.0",
+        "pandas": "3.0.1",
+        "polars": "1.39.3"
+      },
+      "installed_source": {
+        "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "371bc69fb8466cf16600a6d8137081b230591e65",
+          "requested_revision": "371bc69fb8466cf16600a6d8137081b230591e65"
+        }
+      }
+    },
+    "runs": {
+      "inprocess": {
+        "returncode": 0,
+        "elapsed_seconds": 3.9278533048927784,
+        "peaks": {
+          "client": {
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 772,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 553964
+          },
+          "service": {
+            "fd": 6,
+            "optimizer_fds": 0,
+            "maps": 215,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 37460
+          },
+          "samples": 668,
+          "sample_interval_seconds": 0.005
+        },
+        "run_status": {
+          "status": "success",
+          "complete": true
+        },
+        "child_resources": {
+          "baseline": {
+            "pid": 2119637,
+            "fd": 5,
+            "optimizer_fds": 0,
+            "maps": 46,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 19992
+          },
+          "rlimit_nofile": [
+            256,
+            262144
+          ],
+          "final": {
+            "pid": 2119637,
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 771,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 509916
+          }
+        },
+        "service_cleanup_wait_seconds": 0.00036109238862991333,
+        "service_after_client_exit": {
+          "pid": 2119572,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 37460
+        },
+        "output_files": [
+          "output_long_10_daily/cumrets_10_TEST.csv",
+          "output_long_10_daily/decision_targets.parquet",
+          "output_long_10_daily/metrics_10_TEST.csv",
+          "output_long_10_daily/optimizer_calls.jsonl",
+          "output_long_10_daily/portfolio_pnl_4.csv",
+          "output_long_10_daily/positions_4.csv",
+          "output_long_10_daily/returns_10_TEST.csv",
+          "output_long_10_daily/target_weights_4.csv",
+          "output_long_10_daily/target_weights_4.parquet"
+        ],
+        "metrics_files": [
+          "output_long_10_daily/metrics_10_TEST.csv"
+        ]
+      },
+      "shared_memory": {
+        "returncode": 1,
+        "elapsed_seconds": 1.0291249752044678,
+        "peaks": {
+          "client": {
+            "fd": 9,
+            "optimizer_fds": 0,
+            "maps": 644,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 338152
+          },
+          "service": {
+            "fd": 7,
+            "optimizer_fds": 0,
+            "maps": 220,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 37604
+          },
+          "samples": 178,
+          "sample_interval_seconds": 0.005
+        },
+        "run_status": {
+          "status": "failed",
+          "complete": false,
+          "error_type": "OptimizerClientError",
+          "error": "optimizer arena required bytes 63496; allowed bytes 64",
+          "cleanup_status": "complete",
+          "cleanup_errors": []
+        },
+        "child_resources": {
+          "baseline": {
+            "pid": 2120835,
+            "fd": 5,
+            "optimizer_fds": 0,
+            "maps": 46,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 19996
+          },
+          "rlimit_nofile": [
+            256,
+            262144
+          ],
+          "final": {
+            "pid": 2120835,
+            "fd": 9,
+            "optimizer_fds": 0,
+            "maps": 644,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 338152
+          }
+        },
+        "service_cleanup_wait_seconds": 0.00040748342871665955,
+        "service_after_client_exit": {
+          "pid": 2119572,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 37604
+        },
+        "output_files": [
+          "output_long_10_daily/optimizer_calls.jsonl"
+        ],
+        "metrics_files": []
+      }
+    },
+    "status": "failed",
+    "service_baseline": {
+      "pid": 2119572,
+      "fd": 6,
+      "optimizer_fds": 0,
+      "maps": 215,
+      "optimizer_maps": 0,
+      "optimizer_mapped_bytes": 0,
+      "rss_kib": 37460
+    },
+    "service_exit": 0,
+    "socket_residual": false
+  },
+  "capacity_evidence_commit": "371bc69fb8466cf16600a6d8137081b230591e65",
+  "benchmark": {
+    "warmup_excluded": true,
+    "warmup_calls_per_size": 1,
+    "environment": {
+      "python": "3.14.3",
+      "numpy": "2.4.4",
+      "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+      "machine": "x86_64",
+      "logical_cpus": 128
+    },
+    "call_scope": "optimize, map, validate weights, CONSUMED and RELEASE; excludes request construction",
+    "copy_scope": "numeric output model write and consumer view; excludes control JSON and audit materialization",
+    "fd_growth": 0,
+    "results": [
+      {
+        "mode": "inprocess",
+        "assets": 1,
+        "repeats": 30,
+        "wait_p50_ms": 0.035420999999999994,
+        "wait_p95_ms": 0.043991,
+        "model_p50_ms": 0.012965,
+        "model_p95_ms": 0.015511,
+        "call_p50_ms": 0.14024,
+        "call_p95_ms": 0.166356,
+        "mapping_p50_ms": 0.0,
+        "mapping_p95_ms": 0.0,
+        "warmup_call_ms": 16.584441,
+        "first_call_wait_ms": 0.112954,
+        "first_call_model_ms": 0.062452,
+        "connection_setup_ms": 0.025171,
+        "payload_bytes": 8,
+        "shared_bytes": 0,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "inprocess",
+        "assets": 800,
+        "repeats": 30,
+        "wait_p50_ms": 0.1345,
+        "wait_p95_ms": 0.144934,
+        "model_p50_ms": 0.0151705,
+        "model_p95_ms": 0.01716,
+        "call_p50_ms": 0.2584735,
+        "call_p95_ms": 0.273039,
+        "mapping_p50_ms": 0.0,
+        "mapping_p95_ms": 0.0,
+        "warmup_call_ms": 0.310291,
+        "first_call_wait_ms": 0.183526,
+        "first_call_model_ms": 0.046952,
+        "connection_setup_ms": 0.025171,
+        "payload_bytes": 6400,
+        "shared_bytes": 0,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "inprocess",
+        "assets": 5000,
+        "repeats": 30,
+        "wait_p50_ms": 0.5382830000000001,
+        "wait_p95_ms": 0.564538,
+        "model_p50_ms": 0.017285500000000002,
+        "model_p95_ms": 0.01915,
+        "call_p50_ms": 0.7100985,
+        "call_p95_ms": 0.738845,
+        "mapping_p50_ms": 0.0,
+        "mapping_p95_ms": 0.0,
+        "warmup_call_ms": 0.901,
+        "first_call_wait_ms": 0.747135,
+        "first_call_model_ms": 0.022651,
+        "connection_setup_ms": 0.025171,
+        "payload_bytes": 40000,
+        "shared_bytes": 0,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "shared_memory",
+        "assets": 1,
+        "repeats": 30,
+        "wait_p50_ms": 0.232548,
+        "wait_p95_ms": 0.257178,
+        "model_p50_ms": 0.02249,
+        "model_p95_ms": 0.027421,
+        "call_p50_ms": 0.5708690000000001,
+        "call_p95_ms": 0.632481,
+        "mapping_p50_ms": 0.0436065,
+        "mapping_p95_ms": 0.049502,
+        "warmup_call_ms": 1.069786,
+        "first_call_wait_ms": 0.522368,
+        "first_call_model_ms": 0.088983,
+        "connection_setup_ms": 1.644325,
+        "payload_bytes": 8,
+        "shared_bytes": 8,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "shared_memory",
+        "assets": 800,
+        "repeats": 30,
+        "wait_p50_ms": 0.5892295000000001,
+        "wait_p95_ms": 0.5989,
+        "model_p50_ms": 0.0260205,
+        "model_p95_ms": 0.026721,
+        "call_p50_ms": 0.9667725,
+        "call_p95_ms": 0.979073,
+        "mapping_p50_ms": 0.046440999999999996,
+        "mapping_p95_ms": 0.050871,
+        "warmup_call_ms": 1.023914,
+        "first_call_wait_ms": 0.655052,
+        "first_call_model_ms": 0.030121,
+        "connection_setup_ms": 1.644325,
+        "payload_bytes": 6400,
+        "shared_bytes": 6400,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "shared_memory",
+        "assets": 5000,
+        "repeats": 30,
+        "wait_p50_ms": 2.613582,
+        "wait_p95_ms": 2.802344,
+        "model_p50_ms": 0.0377515,
+        "model_p95_ms": 0.040232,
+        "call_p50_ms": 3.1943415,
+        "call_p95_ms": 3.395343,
+        "mapping_p50_ms": 0.0636915,
+        "mapping_p95_ms": 0.070493,
+        "warmup_call_ms": 3.861128,
+        "first_call_wait_ms": 3.3132,
+        "first_call_model_ms": 0.041712,
+        "connection_setup_ms": 1.644325,
+        "payload_bytes": 40000,
+        "shared_bytes": 40000,
+        "transport_copy_bytes": 0
+      }
+    ],
+    "fresh_process_import_ms": 99.690061,
+    "fresh_service_start_ms": 120.133971,
+    "startup_scope": "fresh process; OS page caches not flushed; excludes Numba compilation",
+    "optimizer_commit": "f80f5b7bdd2841ecadf064688b842ab66f5031d2"
+  },
+  "previous_benchmark": {
+    "warmup_excluded": true,
+    "warmup_calls_per_size": 1,
+    "environment": {
+      "python": "3.14.3",
+      "numpy": "2.4.4",
+      "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+      "machine": "x86_64",
+      "logical_cpus": 128
+    },
+    "call_scope": "optimize, map, validate weights, CONSUMED and RELEASE; excludes request construction",
+    "copy_scope": "numeric output model write and consumer view; excludes control JSON and audit materialization",
+    "fd_growth": 0,
+    "results": [
+      {
+        "mode": "inprocess",
+        "assets": 1,
+        "repeats": 30,
+        "wait_p50_ms": 0.034251000000000004,
+        "wait_p95_ms": 0.042611,
+        "model_p50_ms": 0.012856,
+        "model_p95_ms": 0.01546,
+        "call_p50_ms": 0.141025,
+        "call_p95_ms": 0.163965,
+        "mapping_p50_ms": 0.0,
+        "mapping_p95_ms": 0.0,
+        "warmup_call_ms": 17.141728,
+        "payload_bytes": 8,
+        "shared_bytes": 0,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "inprocess",
+        "assets": 800,
+        "repeats": 30,
+        "wait_p50_ms": 0.13553900000000002,
+        "wait_p95_ms": 0.142435,
+        "model_p50_ms": 0.0153855,
+        "model_p95_ms": 0.0167,
+        "call_p50_ms": 0.2643985,
+        "call_p95_ms": 0.271498,
+        "mapping_p50_ms": 0.0,
+        "mapping_p95_ms": 0.0,
+        "warmup_call_ms": 0.30818,
+        "payload_bytes": 6400,
+        "shared_bytes": 0,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "inprocess",
+        "assets": 5000,
+        "repeats": 30,
+        "wait_p50_ms": 0.5331079999999999,
+        "wait_p95_ms": 0.565038,
+        "model_p50_ms": 0.0173005,
+        "model_p95_ms": 0.020711,
+        "call_p50_ms": 0.7056385000000001,
+        "call_p95_ms": 0.743374,
+        "mapping_p50_ms": 0.0,
+        "mapping_p95_ms": 0.0,
+        "warmup_call_ms": 0.90849,
+        "payload_bytes": 40000,
+        "shared_bytes": 0,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "shared_memory",
+        "assets": 1,
+        "repeats": 30,
+        "wait_p50_ms": 0.22696699999999997,
+        "wait_p95_ms": 0.250868,
+        "model_p50_ms": 0.02257,
+        "model_p95_ms": 0.024181,
+        "call_p50_ms": 0.5567934999999999,
+        "call_p95_ms": 0.60816,
+        "mapping_p50_ms": 0.043196,
+        "mapping_p95_ms": 0.049061,
+        "warmup_call_ms": 1.087006,
+        "payload_bytes": 8,
+        "shared_bytes": 8,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "shared_memory",
+        "assets": 800,
+        "repeats": 30,
+        "wait_p50_ms": 0.5802645,
+        "wait_p95_ms": 0.590979,
+        "model_p50_ms": 0.0252705,
+        "model_p95_ms": 0.026361,
+        "call_p50_ms": 0.9389915,
+        "call_p95_ms": 0.950901,
+        "mapping_p50_ms": 0.046481999999999996,
+        "mapping_p95_ms": 0.047211,
+        "warmup_call_ms": 1.022574,
+        "payload_bytes": 6400,
+        "shared_bytes": 6400,
+        "transport_copy_bytes": 0
+      },
+      {
+        "mode": "shared_memory",
+        "assets": 5000,
+        "repeats": 30,
+        "wait_p50_ms": 2.5878604999999997,
+        "wait_p95_ms": 2.746441,
+        "model_p50_ms": 0.036837,
+        "model_p95_ms": 0.038561,
+        "call_p50_ms": 3.15843,
+        "call_p95_ms": 3.255228,
+        "mapping_p50_ms": 0.06379699999999999,
+        "mapping_p95_ms": 0.065062,
+        "warmup_call_ms": 3.756784,
+        "payload_bytes": 40000,
+        "shared_bytes": 40000,
+        "transport_copy_bytes": 0
+      }
+    ]
+  },
+  "failure_evidence": {
+    "r1_red": "/tmp/eq-rework-r1-red.log",
+    "r2_red": "/tmp/eq-rework-r2-test-red.log",
+    "r3_red": "/tmp/eq-rework-r3-red.log",
+    "r4_red": "/tmp/optimizer-rework-r4-red.log",
+    "materialization_red": "/tmp/eq-rework-r3-materialization-red.log",
+    "cleanup_duplicate_red": "/tmp/eq-rework-r3-shm-matrix-red.log",
+    "numeric_cleanup_red": "/tmp/optimizer-rework-py310-numeric-red.log",
+    "py310_initial_failure": "/tmp/eq-rework-py310-final-tests.log",
+    "py311_initial_failure": "/tmp/eq-rework-py311-final-tests.log"
+  },
+  "limits": [
+    "synthetic data only; no production market-data validation",
+    "one arena must fit configured total shared-byte limit; no chunk/resume",
+    "legacy single-request API still requires per-result lease ownership",
+    "OS caches not flushed; optimizer latency excludes Numba compilation",
+    "eq GitHub integration not executed without private dependency token"
+  ]
+}

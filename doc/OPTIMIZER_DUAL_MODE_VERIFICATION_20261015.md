@@ -1,5 +1,10 @@
 # Optimizer 双模式验收记录
 
+> 本文保留初次合并的历史证据。后续 Review 发现前视排序、长周期 FD 峰值和
+> 异常清理等覆盖缺口，本轮修复及新增跨版本、2,000 调仓日验收见
+> [返工验收记录](OPTIMIZER_REWORK_VERIFICATION_20261015.md)。下文的“验收完成”
+> 仅对应当时已执行的样本，不表示已覆盖上述后续发现的场景。
+
 日期：2026-10-15（Asia/Shanghai）。结论：**验收完成，已合并**。两个仓库的 Linux 回归、真实 CLI 双模式对比、资源异常测试和独立安装均通过。用户于 13:14 手动将 [optimizer PR #1](https://github.com/Me2yhm/optimizer/pull/1) squash 合并到 `master`；`eq_backtest/5min-old` 保留原分支。
 
 ## 代码与环境
