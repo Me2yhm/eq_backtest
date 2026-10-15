@@ -50,7 +50,7 @@ import config as cfg
 from data_loader import build_pool
 from market_cache import load_benchmark_returns
 from metrics import holding_period_stats, portfolio_metrics
-from optimizer_adapter import prepare_optimizer_targets
+from optimizer_adapter import close_optimizer_plan, prepare_optimizer_targets
 from optimizer_client import OptimizerClient, create_optimizer_client
 from plotting import (
     plot_holding_periods,
@@ -477,14 +477,18 @@ def _mode_result(
                 timeout_ms=cfg.OPTIMIZER["timeout_ms"],
                 audit_path=Path(output_dir) / "optimizer_calls.jsonl",
             )
+        primary_error = None
         try:
             return _with_sleeve(
                 generate_portfolio(is_short=False, optimizer_plan=optimizer_plan, **long_common),
                 "long",
             )
+        except BaseException as exc:
+            primary_error = exc
+            raise
         finally:
             if optimizer_plan is not None:
-                optimizer_plan.close()
+                close_optimizer_plan(optimizer_plan, primary_error)
     short_port_size, short_thresh_out_buffer = _short_sleeve_parameters(port_size)
     short_common = {
         **common,
@@ -622,6 +626,8 @@ def run() -> None:
         status_path.write_text(json.dumps({
             "status": "failed", "complete": False,
             "error_type": type(exc).__name__, "error": str(exc),
+            "cleanup_status": "failed" if getattr(exc, "cleanup_errors", []) else "complete",
+            "cleanup_errors": getattr(exc, "cleanup_errors", []),
         }, ensure_ascii=False), encoding="utf-8")
         raise
     status_path.write_text(json.dumps({"status": "success", "complete": True}), encoding="utf-8")

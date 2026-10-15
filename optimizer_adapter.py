@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from providers import required_inputs
 NO_SIGNAL = np.int8(0)
 TARGET = np.int8(1)
 LIQUIDATE = np.int8(2)
+logger = logging.getLogger(__name__)
 _DECISION_TARGET_COLUMNS = [
     "portfolio_id",
     "request_id",
@@ -59,18 +61,40 @@ class OptimizerTargetPlan:
 
     def close(self) -> None:
         self.weights_by_bar = None
-        errors: list[Exception] = []
+        errors: list[dict] = []
         pending: list[OptimizerLease] = []
         for lease in self.leases:
             try:
                 lease.release()
             except Exception as exc:
-                errors.append(exc)
+                errors.append({"error_type": type(exc).__name__, "error": str(exc),
+                               "buffer_id": lease.descriptor.get("buffer_id"),
+                               "retryable": not lease.released})
                 if not lease.released:
                     pending.append(lease)
         self.leases = pending
         if errors:
-            raise OptimizerClientError(f"failed to release {len(errors)} optimizer lease(s)") from errors[0]
+            error = OptimizerClientError(f"failed to release {len(errors)} optimizer lease(s)")
+            error.cleanup_errors = errors
+            raise error
+
+
+def close_optimizer_plan(plan: OptimizerTargetPlan, primary: BaseException | None = None) -> None:
+    """Keep a primary failure's identity and traceback; report cleanup separately."""
+    try:
+        plan.close()
+    except Exception as cleanup:
+        details = getattr(cleanup, "cleanup_errors", None) or [
+            {"error_type": type(cleanup).__name__, "error": str(cleanup)}
+        ]
+        owner = primary if primary is not None else cleanup
+        owner.cleanup_errors = list(getattr(owner, "cleanup_errors", [])) + details
+        # Retain a retry handle only when exported views still prevent local close.
+        if plan.leases:
+            owner.optimizer_cleanup_plan = plan
+        logger.error("optimizer cleanup failed: %s", details, exc_info=True)
+        if primary is None:
+            raise
 
 
 def _iso(timestamp: pd.Timestamp) -> str:
@@ -372,7 +396,7 @@ def prepare_optimizer_targets(
                     "target_budget": target_budget,
                     "cash_policy": "retain",
                 })
-    except Exception:
+    except BaseException as primary:
         plan = OptimizerTargetPlan(
             events,
             offsets,
@@ -384,7 +408,7 @@ def prepare_optimizer_targets(
         )
         # Drop the local Numba list too before closing mmap-backed leases.
         weights_by_bar = None
-        plan.close()
+        close_optimizer_plan(plan, primary)
         raise
 
     return OptimizerTargetPlan(
