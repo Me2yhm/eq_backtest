@@ -41,6 +41,10 @@ class CleanupPriorityTests(unittest.TestCase):
         plan.close.side_effect = OptimizerClientError("release ACK lost")
         client = MagicMock()
         client.__enter__.return_value = client
+        def execute(factory):
+            with runner._optimizer_session(factory, 2) as active_client:
+                return runner._mode_result(_pool(), "long_only", port_size=2,
+                                           output_dir=tmp, optimizer_client=active_client)
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.object(runner.cfg, "RUN_DIR", Path(tmp)),
@@ -49,8 +53,7 @@ class CleanupPriorityTests(unittest.TestCase):
                 patch.object(runner, "create_optimizer_client", return_value=client),
                 patch.object(runner, "prepare_optimizer_targets", return_value=plan),
                 patch.object(runner, "generate_portfolio", side_effect=primary),
-                patch.object(runner, "_run", side_effect=lambda c: runner._mode_result(
-                    _pool(), "long_only", port_size=2, output_dir=tmp, optimizer_client=c)),
+                patch.object(runner, "_run", side_effect=execute),
             ):
                 with self.assertRaises(ValueError) as caught:
                     runner.run()

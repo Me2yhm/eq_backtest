@@ -110,10 +110,11 @@ class ShmCleanupPriorityTests(unittest.TestCase):
         run_dir = Path(self.tmp.name) / f"run-{operation}-{cleanup_failure}"
         run_dir.mkdir()
 
-        def execute(active_client):
-            results.append(runner._mode_result(
-                _pool(), "long_only", port_size=2, output_dir=str(run_dir), optimizer_client=active_client,
-            ))
+        def execute(factory):
+            with runner._optimizer_session(factory, 2) as active_client:
+                results.append(runner._mode_result(
+                    _pool(), "long_only", port_size=2, output_dir=str(run_dir), optimizer_client=active_client,
+                ))
 
         def fail_audit(*args, **kwargs):
             error = ValueError("original audit materialization failure")
