@@ -650,7 +650,11 @@ def _simulate_portfolio_core(
                         opening_priority = 0.0 if fresh_short_open else float(n_symbols)
                         buy_keys[buy_count] = opening_priority + rank_by_symbol[symbol_id] + symbol_id * 1e-12
                     else:
-                        buy_keys[buy_count] = -pred[row_idx] + symbol_id * 1e-12
+                        # Priority is fixed by the signal bar, including when
+                        # cash cannot fill every target. The execution row
+                        # supplies trade feasibility and prices only.
+                        signal_row_idx = signal_row_by_symbol[symbol_id]
+                        buy_keys[buy_count] = -pred[signal_row_idx] + symbol_id * 1e-12
                     buy_count += 1
 
             if debug_this_bar:
