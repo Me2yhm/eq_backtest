@@ -4,9 +4,9 @@ import importlib.util
 import os
 import sys
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -14,20 +14,21 @@ import pandas as pd
 import polars as pl
 
 from data_loader import (
+    BacktestDataset,
     _attach_daily_price_fields,
     _pool_cache_path,
     _prediction_sources,
     _validate_prediction_frames,
-    BacktestDataset,
     load_predictions,
 )
 from market_cache import _parse_args, _refresh_instruments, load_benchmark_returns
 from metrics import holding_period_stats
 from plotting import _ensure_plot_dir, plot_position_heatmap
 from portfolio import generate_portfolio
+from research import main as research_main
+from research import signal_validation
 from run import _short_sleeve_parameters, compute_returns, run_single_portfolio
 from sbl_loader import load_borrow_availability
-from research import main as research_main, signal_validation
 
 
 class PlanBehaviorTests(unittest.TestCase):

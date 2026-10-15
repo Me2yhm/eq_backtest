@@ -50,14 +50,14 @@ import config as cfg
 from data_loader import build_pool
 from market_cache import load_benchmark_returns
 from metrics import holding_period_stats, portfolio_metrics
+from optimizer_adapter import prepare_optimizer_targets
+from optimizer_client import OptimizerClient, create_optimizer_client
 from plotting import (
     plot_holding_periods,
     plot_metrics_table,
     plot_portfolio_results,
 )
 from portfolio import PortfolioResult, generate_portfolio
-from optimizer_adapter import prepare_optimizer_targets
-from optimizer_client import OptimizerClient, create_optimizer_client
 
 
 @dataclass(slots=True)

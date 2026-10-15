@@ -4,9 +4,9 @@ The implementation lives in the installable optimizer package.  This module
 keeps the existing EQ Backtest import surface small and stable.
 """
 
-from optimizer import InProcessOptimizerClient, OptimizerClientError, OptimizerLease
 from optimizer.transport.shm import ShmOptimizerClient
 
+from optimizer import InProcessOptimizerClient, OptimizerClientError, OptimizerLease
 
 OptimizerClient = ShmOptimizerClient
 

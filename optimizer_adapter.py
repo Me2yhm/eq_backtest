@@ -2,29 +2,36 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
-from pathlib import Path
 import time
 import uuid
+from dataclasses import dataclass
+from pathlib import Path
 
-from numba import types
-from numba.typed import List
 import numpy as np
 import pandas as pd
+from numba import types
+from numba.typed import List
 
 from data_loader import BacktestDataset
 from optimizer_client import OptimizerClient, OptimizerClientError, OptimizerLease
 from providers import required_inputs
 
-
 NO_SIGNAL = np.int8(0)
 TARGET = np.int8(1)
 LIQUIDATE = np.int8(2)
 _DECISION_TARGET_COLUMNS = [
-    "portfolio_id", "request_id", "decision_as_of", "planned_execution_at", "symbol",
-    "weight_target", "portfolio_size", "target_count", "target_budget", "cash_policy",
+    "portfolio_id",
+    "request_id",
+    "decision_as_of",
+    "planned_execution_at",
+    "symbol",
+    "weight_target",
+    "portfolio_size",
+    "target_count",
+    "target_budget",
+    "cash_policy",
 ]
 
 
@@ -181,12 +188,14 @@ def prepare_optimizer_targets(
     dependencies = required_inputs(client.capabilities, model)
     if dependencies:
         raise ValueError(
-            "configured optimizer model requires data providers that are not enabled: "
-            + ", ".join(dependencies)
+            "configured optimizer model requires data providers that are not enabled: " + ", ".join(dependencies)
         )
     events, selections = _select_targets(
-        pool, port_size=port_size, thresh_out=port_size + thresh_out_buffer,
-        size_cut=size_cut, close_on_size_drop=close_on_size_drop,
+        pool,
+        port_size=port_size,
+        thresh_out=port_size + thresh_out_buffer,
+        size_cut=size_cut,
+        close_on_size_drop=close_on_size_drop,
     )
     required_resident_bytes = sum(len(selection) * 8 for selection in selections)
     client.validate_resident_bytes(required_resident_bytes)
@@ -197,13 +206,23 @@ def prepare_optimizer_targets(
     target_rows: list[dict] = []
     weights_by_bar = List.empty_list(types.Array(types.float64, 1, "C", readonly=True))
     bars = pd.to_datetime(pool.bars)
-    config_signature = hashlib.sha256(json.dumps(
-        {"model": model, "port_size": port_size, "thresh_out_buffer": thresh_out_buffer,
-         "size_cut": size_cut, "close_on_size_drop": close_on_size_drop,
-         "cash_policy": "retain", "schema_version": client.schema_version,
-         "protocol_version": client.protocol_version},
-        sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+    config_signature = hashlib.sha256(
+        json.dumps(
+            {
+                "model": model,
+                "port_size": port_size,
+                "thresh_out_buffer": thresh_out_buffer,
+                "size_cut": size_cut,
+                "close_on_size_drop": close_on_size_drop,
+                "cash_policy": "retain",
+                "schema_version": client.schema_version,
+                "protocol_version": client.protocol_version,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
     try:
         for bar_idx, event in enumerate(events):
@@ -216,13 +235,16 @@ def prepare_optimizer_targets(
                 empty.setflags(write=False)
                 weights_by_bar.append(empty)
                 if bar_idx < len(bars) - 1:
-                    row = {"portfolio_id": portfolio_id,
-                           "decision_as_of": _iso(_daily_timestamp(bars[bar_idx], 15)),
-                           "planned_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
-                           "actual_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
-                           "event": "no_signal",
-                           "status": "skipped", "request_id": None,
-                           "config_signature": config_signature}
+                    row = {
+                        "portfolio_id": portfolio_id,
+                        "decision_as_of": _iso(_daily_timestamp(bars[bar_idx], 15)),
+                        "planned_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
+                        "actual_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
+                        "event": "no_signal",
+                        "status": "skipped",
+                        "request_id": None,
+                        "config_signature": config_signature,
+                    }
                     calls.append(row)
                     _append_audit(audit_path, row)
                 continue
@@ -230,12 +252,17 @@ def prepare_optimizer_targets(
                 empty = np.empty(0, dtype=np.float64)
                 empty.setflags(write=False)
                 weights_by_bar.append(empty)
-                row = {"portfolio_id": portfolio_id,
-                       "decision_as_of": _iso(_daily_timestamp(bars[bar_idx], 15)),
-                       "planned_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
-                       "actual_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
-                       "event": "liquidate",
-                       "status": "accepted", "request_id": None, "target_count": 0, "target_budget": 0.0}
+                row = {
+                    "portfolio_id": portfolio_id,
+                    "decision_as_of": _iso(_daily_timestamp(bars[bar_idx], 15)),
+                    "planned_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
+                    "actual_execution_at": _iso(_daily_timestamp(bars[bar_idx + 1], 9, 30)),
+                    "event": "liquidate",
+                    "status": "accepted",
+                    "request_id": None,
+                    "target_count": 0,
+                    "target_budget": 0.0,
+                }
                 row["config_signature"] = config_signature
                 calls.append(row)
                 _append_audit(audit_path, row)
@@ -253,12 +280,19 @@ def prepare_optimizer_targets(
             request = {
                 "schema_version": client.schema_version,
                 "request_id": request_id,
-                "data_context": {"as_of": _iso(context.as_of),
-                                 "planned_execution_at": _iso(context.planned_execution_at),
-                                 "frequency": "daily"},
-                "portfolio_policy": {"long_only": True, "fully_invested": False, "allow_cash": True,
-                                     "allow_leverage": False, "cash_policy": "retain",
-                                     "target_budget": target_budget},
+                "data_context": {
+                    "as_of": _iso(context.as_of),
+                    "planned_execution_at": _iso(context.planned_execution_at),
+                    "frequency": "daily",
+                },
+                "portfolio_policy": {
+                    "long_only": True,
+                    "fully_invested": False,
+                    "allow_cash": True,
+                    "allow_leverage": False,
+                    "cash_policy": "retain",
+                    "target_budget": target_budget,
+                },
                 "model": model,
                 "universe": {"asset_ids": [_contract_symbol(pool.symbols[index]) for index in selected]},
                 "constraints": [],
@@ -268,11 +302,16 @@ def prepare_optimizer_targets(
             try:
                 lease, wait_ms = client.optimize(request)
             except OptimizerClientError as exc:
-                row = {"portfolio_id": portfolio_id, "request_id": request_id,
-                       "decision_as_of": _iso(context.as_of),
-                       "planned_execution_at": _iso(context.planned_execution_at),
-                       "actual_execution_at": _iso(context.planned_execution_at),
-                       "event": "target", "status": "failed", "error": str(exc)}
+                row = {
+                    "portfolio_id": portfolio_id,
+                    "request_id": request_id,
+                    "decision_as_of": _iso(context.as_of),
+                    "planned_execution_at": _iso(context.planned_execution_at),
+                    "actual_execution_at": _iso(context.planned_execution_at),
+                    "event": "target",
+                    "status": "failed",
+                    "error": str(exc),
+                }
                 row["config_signature"] = config_signature
                 if exc.response:
                     row["service_status"] = exc.response.get("status")
@@ -286,42 +325,69 @@ def prepare_optimizer_targets(
             response = lease.response
             descriptor = lease.descriptor
             row = {
-                "portfolio_id": portfolio_id, "request_id": request_id,
-                "decision_as_of": _iso(context.as_of), "planned_execution_at": _iso(context.planned_execution_at),
+                "portfolio_id": portfolio_id,
+                "request_id": request_id,
+                "decision_as_of": _iso(context.as_of),
+                "planned_execution_at": _iso(context.planned_execution_at),
                 "actual_execution_at": _iso(context.planned_execution_at),
-                "event": "target", "status": response["status"], "schema_version": client.schema_version,
-                "protocol_version": client.protocol_version, "model_type": model["type"],
-                "model_version": model["version"], "session_id": client.session_id,
-                "service_epoch": client.service_epoch, "buffer_id": descriptor["buffer_id"],
-                "generation": descriptor["generation"], "shared_bytes": lease.shared_bytes,
+                "event": "target",
+                "status": response["status"],
+                "schema_version": client.schema_version,
+                "protocol_version": client.protocol_version,
+                "model_type": model["type"],
+                "model_version": model["version"],
+                "session_id": client.session_id,
+                "service_epoch": client.service_epoch,
+                "buffer_id": descriptor["buffer_id"],
+                "generation": descriptor["generation"],
+                "shared_bytes": lease.shared_bytes,
                 "staging_bytes": response.get("diagnostics", {}).get("staging_bytes", 0),
-                "copy_bytes": lease.copy_bytes, "wait_ms": wait_ms,
+                "copy_bytes": lease.copy_bytes,
+                "wait_ms": wait_ms,
                 "audit_materialization_bytes": descriptor["nbytes"],
                 "prepare_ms": prepare_ms,
                 "mapping_validation_ms": lease.mapping_validation_ms,
                 "model_time_ms": response.get("diagnostics", {}).get("model_time_ms"),
-                "target_count": len(selected), "portfolio_size": port_size,
-                "target_budget": target_budget, "cash_policy": "retain",
+                "target_count": len(selected),
+                "portfolio_size": port_size,
+                "target_budget": target_budget,
+                "cash_policy": "retain",
                 "config_signature": config_signature,
             }
             calls.append(row)
             _append_audit(audit_path, row)
             for symbol_id, weight in zip(selected, lease.weights):
                 target_rows.append({
-                    "portfolio_id": portfolio_id, "request_id": request_id,
-                    "decision_as_of": context.as_of, "planned_execution_at": context.planned_execution_at,
-                    "symbol": pool.symbols[symbol_id], "weight_target": float(weight),
-                    "portfolio_size": port_size, "target_count": len(selected),
-                    "target_budget": target_budget, "cash_policy": "retain",
+                    "portfolio_id": portfolio_id,
+                    "request_id": request_id,
+                    "decision_as_of": context.as_of,
+                    "planned_execution_at": context.planned_execution_at,
+                    "symbol": pool.symbols[symbol_id],
+                    "weight_target": float(weight),
+                    "portfolio_size": port_size,
+                    "target_count": len(selected),
+                    "target_budget": target_budget,
+                    "cash_policy": "retain",
                 })
     except Exception:
-        plan = OptimizerTargetPlan(events, offsets,
-                                   np.concatenate(flat_parts) if flat_parts else np.empty(0, dtype=np.int32),
-                                   weights_by_bar, leases, calls, _decision_target_frame(target_rows))
+        plan = OptimizerTargetPlan(
+            events,
+            offsets,
+            np.concatenate(flat_parts) if flat_parts else np.empty(0, dtype=np.int32),
+            weights_by_bar,
+            leases,
+            calls,
+            _decision_target_frame(target_rows),
+        )
         plan.close()
         raise
 
     return OptimizerTargetPlan(
-        events, offsets, np.concatenate(flat_parts) if flat_parts else np.empty(0, dtype=np.int32),
-        weights_by_bar, leases, calls, _decision_target_frame(target_rows),
+        events,
+        offsets,
+        np.concatenate(flat_parts) if flat_parts else np.empty(0, dtype=np.int32),
+        weights_by_bar,
+        leases,
+        calls,
+        _decision_target_frame(target_rows),
     )

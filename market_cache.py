@@ -20,13 +20,12 @@ import math
 import os
 import re
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Mapping, Sequence
 
 import pandas as pd
-
 
 MARKET_CACHE_FIELDS: tuple[str, str, str] = ("date", "close", "pct_change")
 _SYMBOL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -47,9 +46,7 @@ class CachedInstrument:
 
 def _validate_symbol(symbol: str) -> str:
     if not isinstance(symbol, str) or not _SYMBOL_PATTERN.fullmatch(symbol):
-        raise MarketDataCacheError(
-            "Benchmark symbol must contain only letters, digits, '.', '_', or '-'."
-        )
+        raise MarketDataCacheError("Benchmark symbol must contain only letters, digits, '.', '_', or '-'.")
     return symbol
 
 
@@ -90,8 +87,7 @@ def resolve_cached_instrument(cache_dir: Path, symbol: str) -> CachedInstrument:
     matches = [
         item
         for item in instruments
-        if isinstance(item, dict)
-        and symbol in {item.get("instrument_id"), item.get("rq_symbol")}
+        if isinstance(item, dict) and symbol in {item.get("instrument_id"), item.get("rq_symbol")}
     ]
     if len(matches) > 1:
         raise MarketDataCacheError(f"Market-cache manifest maps benchmark symbol {symbol!r} more than once.")
@@ -128,12 +124,7 @@ def _read_cache_rows(path: Path) -> dict[date, tuple[float, float]]:
                 pct_change = float(row["pct_change"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise MarketDataCacheError(f"{path.name} row {line_number} is invalid.") from exc
-            if (
-                observation_date in rows
-                or close <= 0.0
-                or not math.isfinite(close)
-                or not math.isfinite(pct_change)
-            ):
+            if observation_date in rows or close <= 0.0 or not math.isfinite(close) or not math.isfinite(pct_change):
                 raise MarketDataCacheError(f"{path.name} row {line_number} is invalid or duplicated.")
             rows[observation_date] = (close, pct_change)
     if not rows:
@@ -168,13 +159,10 @@ def load_benchmark_returns(
     selected = [
         (observation_date, pct_change)
         for observation_date, (_, pct_change) in sorted(rows.items())
-        if (start_date is None or observation_date >= start_date)
-        and (end_date is None or observation_date <= end_date)
+        if (start_date is None or observation_date >= start_date) and (end_date is None or observation_date <= end_date)
     ]
     if not selected:
-        raise MarketDataCacheError(
-            f"Benchmark {symbol!r} has no cached returns in the requested date range."
-        )
+        raise MarketDataCacheError(f"Benchmark {symbol!r} has no cached returns in the requested date range.")
     index = pd.DatetimeIndex([observation_date for observation_date, _ in selected], name="date")
     return pd.Series([pct_change for _, pct_change in selected], index=index, name="ret", dtype=float)
 
@@ -239,13 +227,11 @@ def _write_cache_rows(path: Path, closes: Mapping[date, float]) -> None:
         writer.writeheader()
         for observation_date, close in sorted(closes.items()):
             pct_change = 0.0 if previous_close is None else close / previous_close - 1.0
-            writer.writerow(
-                {
-                    "date": observation_date.isoformat(),
-                    "close": format(close, ".17g"),
-                    "pct_change": format(pct_change, ".17g"),
-                }
-            )
+            writer.writerow({
+                "date": observation_date.isoformat(),
+                "close": format(close, ".17g"),
+                "pct_change": format(pct_change, ".17g"),
+            })
             previous_close = close
     temporary_path.replace(path)
 
@@ -287,9 +273,7 @@ def refresh_market_cache(
     result: dict[str, str] = {}
     for instrument, first_date in _refresh_instruments(cache_dir):
         if first_date > end_date:
-            raise MarketDataCacheError(
-                f"Manifest first_date for {instrument.symbol!r} is after refresh end date."
-            )
+            raise MarketDataCacheError(f"Manifest first_date for {instrument.symbol!r} is after refresh end date.")
         existing = _read_cache_rows(instrument.path) if instrument.path.exists() else {}
         closes = {observation_date: close for observation_date, (close, _) in existing.items()}
         query_start = max(first_date, max(closes)) if closes else first_date

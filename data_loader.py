@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from loguru import logger
-from sbl_loader import load_borrow_availability, sbl_source_signature
 
+from sbl_loader import load_borrow_availability, sbl_source_signature
 
 POOL_CACHE_VERSION = 11
 _BASE_COLUMNS = {
@@ -160,8 +160,7 @@ def _prediction_sources(freq_cfg: dict) -> list[PredictionSource]:
             unexpected = set(raw_source).difference({"file", "start", "end"})
             if unexpected:
                 raise ValueError(
-                    f"prediction_sources[{index}] has unsupported keys: {sorted(unexpected)}; "
-                    "expected file, start, end"
+                    f"prediction_sources[{index}] has unsupported keys: {sorted(unexpected)}; expected file, start, end"
                 )
             file_value = raw_source.get("file")
             start = _as_iso_date(raw_source.get("start"), f"[{index}].start")

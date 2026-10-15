@@ -508,8 +508,7 @@ def _simulate_portfolio_core(
                         symbol_id = target_symbols[i]
                         rank_value = rank_by_symbol[symbol_id]
                         score = (thresh_out - rank_value + 1.0) / thresh_out
-                        if score < 0.0:
-                            score = 0.0
+                        score = max(score, 0.0)
                         if weight_mode_code == 2:
                             score = score * score
                         target_weight_by_symbol[symbol_id] = score
@@ -522,8 +521,7 @@ def _simulate_portfolio_core(
                             target_weight_by_symbol[symbol_id] = (
                                 target_weight_by_symbol[symbol_id] / raw_sum * target_capital
                             )
-                            if target_weight_by_symbol[symbol_id] > max_weight:
-                                target_weight_by_symbol[symbol_id] = max_weight
+                            target_weight_by_symbol[symbol_id] = min(target_weight_by_symbol[symbol_id], max_weight)
 
             if debug_this_bar:
                 symbol_id = debug_target_symbol_id
@@ -551,8 +549,7 @@ def _simulate_portfolio_core(
                     if current_weights[symbol_id] <= eps and row_idx != -1 and can_open[row_idx]:
                         qualified_short_open_count += 1
                 short_full_close_budget = held_count + qualified_short_open_count - port_size
-                if short_full_close_budget < 0:
-                    short_full_close_budget = 0
+                short_full_close_budget = max(short_full_close_budget, 0)
 
             sell_count = 0
             for i in range(held_count):
@@ -594,8 +591,7 @@ def _simulate_portfolio_core(
                         continue
 
                     sellable = cur_w - frozen_weights[symbol_id]
-                    if sellable < 0.0:
-                        sellable = 0.0
+                    sellable = max(sellable, 0.0)
                     if sellable <= eps:
                         if debug_this_bar and symbol_id == debug_target_symbol_id and debug_close_reason < 0:
                             debug_close_reason = 302
@@ -610,10 +606,8 @@ def _simulate_portfolio_core(
                         continue
 
                     sell_w = reduction
-                    if sell_w > sellable:
-                        sell_w = sellable
-                    if sell_w > remaining_sell_budget:
-                        sell_w = remaining_sell_budget
+                    sell_w = min(sell_w, sellable)
+                    sell_w = min(sell_w, remaining_sell_budget)
                     if sell_w <= eps:
                         continue
 
@@ -678,8 +672,7 @@ def _simulate_portfolio_core(
                     if deficit <= eps:
                         continue
                     buy_w = deficit
-                    if buy_w > cash_weight:
-                        buy_w = cash_weight
+                    buy_w = min(buy_w, cash_weight)
                     if buy_w <= eps:
                         continue
 
@@ -1174,7 +1167,7 @@ def generate_portfolio(
     portfolio_initial_value: float = 1e8,
     weight_mode: str = "equal",
     max_weight_multiple: float = 2.0,
-    optimizer_plan: "OptimizerTargetPlan | None" = None,
+    optimizer_plan: OptimizerTargetPlan | None = None,
 ) -> PortfolioResult:
     """Simulate a frequency-independent equal-weight portfolio with daily constraints."""
     thresh_out = port_size + thresh_out_buffer

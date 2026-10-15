@@ -6,10 +6,11 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Iterator
 from datetime import date, datetime
 from itertools import chain
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import polars as pl
 import pyarrow as pa

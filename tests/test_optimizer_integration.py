@@ -1,31 +1,35 @@
 from __future__ import annotations
 
-import os
 import importlib.util
-from array import array
 import json
-from pathlib import Path
+import os
 import socket
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import unittest
-import sys
-import threading
+from array import array
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from numba import types
-from numba.typed import List
 import numpy as np
 import pandas as pd
 import polars as pl
+from numba import types
+from numba.typed import List
 
+import run as run_module
 from data_loader import BacktestDataset
-from optimizer_adapter import OptimizerTargetPlan, _select_targets, prepare_optimizer_targets
+from optimizer_adapter import (
+    OptimizerTargetPlan,
+    _select_targets,
+    prepare_optimizer_targets,
+)
 from optimizer_client import OptimizerClient, OptimizerClientError
 from portfolio import generate_portfolio
 from providers import ProviderSnapshot, required_inputs, resolve_snapshots
-import run as run_module
 
 
 def _pool(*, second_day_can_open: bool = True) -> BacktestDataset:
