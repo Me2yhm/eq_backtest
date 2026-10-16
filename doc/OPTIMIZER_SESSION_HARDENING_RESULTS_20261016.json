@@ -1,0 +1,2759 @@
+{
+  "date": "2026-10-16",
+  "timezone": "Asia/Shanghai",
+  "status": "code_ready_for_review; consumer_remote_integration_blocked_by_accepted_authorization_limit",
+  "source": {
+    "remote": "github",
+    "optimizer": {
+      "baseline": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+      "head": "3ca073335b40d54e7396d258c42470dec96a4c42",
+      "branch": "fix/shm-arena-contract-hardening",
+      "pr": "https://github.com/Me2yhm/optimizer/pull/2",
+      "base": "master",
+      "base_head": "988a1381f0030d93870c36cacddf71efc1815d3f"
+    },
+    "eq_backtest": {
+      "baseline": "f2b072a0c45004e6c54c8e2b33fd884f68e72c01",
+      "validated_code_head": "58483b1e026c93dbcf711ea52990ad96bf2d5df0",
+      "branch": "fix/optimizer-session-lifecycle",
+      "pr": "https://github.com/Me2yhm/eq_backtest/pull/1",
+      "base": "5min-old",
+      "slow_path_runtime_commit": "5a09cd9",
+      "runtime_ast_unchanged_since_slow_path": true
+    },
+    "merge_performed": false,
+    "evidence_scope": "Code head above excludes the subsequent report-only commit. Slow-path code was already present before this resumed turn; final validator additionally asserts service_exit==0 and was reapplied to both saved cases without rerunning them."
+  },
+  "baseline": {
+    "date": "2026-10-15",
+    "timezone": "Asia/Shanghai",
+    "python": "3.14.3 (main, Mar 24 2026, 22:50:36) [Clang 22.1.1 ]",
+    "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+    "uv": "uv 0.11.3 (x86_64-unknown-linux-gnu)",
+    "rlimit_nofile": [
+      262144,
+      262144
+    ],
+    "fd_baseline": 4,
+    "packages": {
+      "numpy": "2.4.4",
+      "numba": "0.65.0",
+      "polars": "1.39.3",
+      "pandas": "3.0.1",
+      "optimizer": "0.2.0"
+    },
+    "optimizer_source": {
+      "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+        "requested_revision": "f80f5b7bdd2841ecadf064688b842ab66f5031d2"
+      }
+    },
+    "service_command": [
+      "/home/yhm/eq-backtest/.venv/bin/python",
+      "-I",
+      "-m",
+      "optimizer.transport.shm.service",
+      "--socket",
+      "<dedicated-run>/ipc/service.sock"
+    ],
+    "baselines": {
+      "optimizer": "f80f5b7bdd2841ecadf064688b842ab66f5031d2",
+      "eq_backtest": "f2b072a0c45004e6c54c8e2b33fd884f68e72c01"
+    },
+    "baseline_tests": {
+      "optimizer": 56,
+      "eq_backtest": 50,
+      "skips": 0,
+      "logs": [
+        "/tmp/optimizer-session-baseline-20261015.log",
+        "/tmp/eq-session-baseline-20261015.log"
+      ]
+    },
+    "branches": {
+      "optimizer": "fix/shm-arena-contract-hardening",
+      "eq_backtest": "fix/optimizer-session-lifecycle"
+    }
+  },
+  "baseline_tests": {
+    "optimizer": {
+      "path": "/tmp/optimizer-session-baseline-20261015.log",
+      "sha256": "a96a0e3537ac706c7b89bd48a34fd5a843e310e72afa82d54ce71e284d4661af",
+      "bytes": 9998,
+      "tests": 56,
+      "seconds": 9.634,
+      "skips": 0,
+      "status": "passed"
+    },
+    "eq_backtest": {
+      "path": "/tmp/eq-session-baseline-20261015.log",
+      "sha256": "35996e82ac237828d98857ca0777907f1c718277bc46672bd361460946698d3c",
+      "bytes": 15825,
+      "tests": 50,
+      "seconds": 21.745,
+      "skips": 0,
+      "status": "passed"
+    }
+  },
+  "red_regressions": {
+    "optimizer": {
+      "path": "/tmp/optimizer-session-red.log",
+      "sha256": "886c268d6ec9ed9f5231b6a1bbb6b30768c574f60f3f71c21908a9a3b4e524f6",
+      "bytes": 8264,
+      "test_commit": "d2e414f",
+      "methods": 3,
+      "failing_scenarios": 4,
+      "cause": "Real UDS old fixed socket idle timeout, shortened only by the red fixture to 150ms; health, retained arena release, and subsequent single/batch requests fail after 450ms."
+    },
+    "eq_backtest": {
+      "path": "/tmp/eq-session-red-uds.log",
+      "sha256": "8159682a1a23b351a19d32b92c7d8aa5ad60a3be0664c56678ab93c57c151d89",
+      "bytes": 7136,
+      "test_commit": "e734ad8",
+      "methods": 2,
+      "cause": "Real UDS session opened before slow loading and reused across all portfolios/reporting.",
+      "excluded_attempt": "/tmp/eq-session-red.log failed due to sandbox permissions and is not defect reproduction evidence"
+    },
+    "ci": {
+      "path": "/tmp/eq-session-ci-red-20261016.log",
+      "sha256": "8d98183d9e070dfb4f2085559ceb579f561d24825b87920487902bdb68c9736f",
+      "bytes": 2337,
+      "cause": "main push and PR-base matching both failed before workflow branch filters were corrected"
+    }
+  },
+  "green_specialized": {
+    "optimizer_idle": {
+      "path": "/tmp/optimizer-session-green.log",
+      "sha256": "9fe981e497c3ca0eca89033adbf2490364f818c016ca80b6d32a148cfaabd2e3",
+      "bytes": 1574,
+      "tests": 8,
+      "seconds": 5.07,
+      "skips": 0,
+      "status": "passed"
+    },
+    "eq_lifecycle": {
+      "path": "/tmp/eq-session-green.log",
+      "sha256": "5695103783c6f1c13537809fd9771ab44459b65df5b13713ab83ee1690d31bfd",
+      "bytes": 40220,
+      "tests": 7,
+      "seconds": 3.701,
+      "skips": 0,
+      "status": "passed"
+    },
+    "ci_contract": {
+      "path": "/tmp/eq-session-ci-green-20261016.log",
+      "sha256": "2fb34abab146e93bd8f41e438b560bea41fd8787a491b9ebeab85330631fbedf",
+      "bytes": 456,
+      "tests": 2,
+      "seconds": 0.04,
+      "skips": 0,
+      "status": "passed"
+    }
+  },
+  "final_suites": {
+    "optimizer": {
+      "310": {
+        "path": "/tmp/optimizer-session-final-py310-20261016.log",
+        "sha256": "fd0cbc2c552b8959c7402676dd86704601c79781b166c420c8113f9bb64aa27f",
+        "bytes": 7784,
+        "tests": 64,
+        "seconds": 14.684,
+        "skips": 0,
+        "status": "passed"
+      },
+      "311": {
+        "path": "/tmp/optimizer-session-final-py311-20261016.log",
+        "sha256": "1783019cf2fe24d5959d3ae05af89204ebb604a407d23c478c05820386ded6c3",
+        "bytes": 11382,
+        "tests": 64,
+        "seconds": 14.799,
+        "skips": 0,
+        "status": "passed"
+      },
+      "314": {
+        "path": "/tmp/optimizer-session-final-py314-20261016.log",
+        "sha256": "3989e39e925fec6860ec9682477b866e943c722b62a6239eec049317d886e8d5",
+        "bytes": 11427,
+        "tests": 64,
+        "seconds": 14.641,
+        "skips": 0,
+        "status": "passed"
+      }
+    },
+    "eq_backtest": {
+      "310": {
+        "path": "/tmp/eq-session-final-py310-20261016.log",
+        "sha256": "5e9931b5472a84c61f700dd9bf0066e7b3ce906b9a2f760930ba80b41ca8b4b0",
+        "bytes": 55263,
+        "tests": 60,
+        "seconds": 58.559,
+        "skips": 0,
+        "status": "passed"
+      },
+      "311": {
+        "path": "/tmp/eq-session-final-py311-20261016.log",
+        "sha256": "331cd97e297b856b04d7a97acfaf0c8d4ff30ef240dff8999890307fb7657605",
+        "bytes": 54983,
+        "tests": 60,
+        "seconds": 59.823,
+        "skips": 0,
+        "status": "passed"
+      },
+      "314": {
+        "path": "/tmp/eq-session-final-py314-20261016.log",
+        "sha256": "45b379b237993414588fac992a39153f0e6a8293841149781f873a13ab7c0e7a",
+        "bytes": 56544,
+        "tests": 60,
+        "seconds": 52.811,
+        "skips": 0,
+        "status": "passed"
+      }
+    },
+    "timing_scope": "Functional regression durations only. Consumer environments used fresh NUMBA_CACHE_DIR values and ran concurrently; do not treat these as production performance benchmarks."
+  },
+  "environments": {
+    "eq_backtest": {
+      "310": {
+        "python": "3.10.21",
+        "executable": "/tmp/eq-session-final-py310/bin/python",
+        "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+        "packages": {
+          "optimizer": "0.2.0",
+          "numpy": "2.2.6",
+          "numba": "0.65.0",
+          "polars": "1.39.3",
+          "pandas": "2.3.3"
+        },
+        "optimizer_file": "/tmp/eq-session-final-py310/lib/python3.10/site-packages/optimizer/__init__.py",
+        "source": {
+          "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+          "vcs_info": {
+            "vcs": "git",
+            "commit_id": "3ca073335b40d54e7396d258c42470dec96a4c42",
+            "requested_revision": "3ca073335b40d54e7396d258c42470dec96a4c42"
+          }
+        },
+        "rlimit_nofile": [
+          262144,
+          262144
+        ]
+      },
+      "311": {
+        "python": "3.11.9",
+        "executable": "/tmp/eq-session-final-py311/bin/python",
+        "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+        "packages": {
+          "optimizer": "0.2.0",
+          "numpy": "2.4.4",
+          "numba": "0.65.0",
+          "polars": "1.39.3",
+          "pandas": "3.0.1"
+        },
+        "optimizer_file": "/tmp/eq-session-final-py311/lib/python3.11/site-packages/optimizer/__init__.py",
+        "source": {
+          "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+          "vcs_info": {
+            "vcs": "git",
+            "commit_id": "3ca073335b40d54e7396d258c42470dec96a4c42",
+            "requested_revision": "3ca073335b40d54e7396d258c42470dec96a4c42"
+          }
+        },
+        "rlimit_nofile": [
+          262144,
+          262144
+        ]
+      },
+      "314": {
+        "python": "3.14.3",
+        "executable": "/tmp/eq-session-final-py314/bin/python",
+        "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+        "packages": {
+          "optimizer": "0.2.0",
+          "numpy": "2.4.4",
+          "numba": "0.65.0",
+          "polars": "1.39.3",
+          "pandas": "3.0.1"
+        },
+        "optimizer_file": "/tmp/eq-session-final-py314/lib/python3.14/site-packages/optimizer/__init__.py",
+        "source": {
+          "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+          "vcs_info": {
+            "vcs": "git",
+            "commit_id": "3ca073335b40d54e7396d258c42470dec96a4c42",
+            "requested_revision": "3ca073335b40d54e7396d258c42470dec96a4c42"
+          }
+        },
+        "rlimit_nofile": [
+          262144,
+          262144
+        ]
+      }
+    },
+    "optimizer": {
+      "310": {
+        "python": "3.10.21",
+        "executable": "/tmp/optimizer-rework-py310/bin/python",
+        "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+        "packages": {
+          "optimizer": "0.2.0",
+          "numpy": "2.2.6"
+        },
+        "optimizer_file": "/home/yhm/optimizer/optimizer/__init__.py",
+        "source": {},
+        "rlimit_nofile": [
+          262144,
+          262144
+        ]
+      },
+      "311": {
+        "python": "3.11.9",
+        "executable": "/tmp/optimizer-rework-py311/bin/python",
+        "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+        "packages": {
+          "optimizer": "0.2.0",
+          "numpy": "2.4.6"
+        },
+        "optimizer_file": "/home/yhm/optimizer/optimizer/__init__.py",
+        "source": {},
+        "rlimit_nofile": [
+          262144,
+          262144
+        ]
+      },
+      "314": {
+        "python": "3.14.3",
+        "executable": "/home/yhm/optimizer/.venv/bin/python",
+        "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+        "packages": {
+          "optimizer": "0.2.0",
+          "numpy": "2.5.2"
+        },
+        "optimizer_file": "/home/yhm/optimizer/optimizer/__init__.py",
+        "source": {},
+        "rlimit_nofile": [
+          262144,
+          262144
+        ]
+      }
+    },
+    "uv": "uv 0.11.3 (x86_64-unknown-linux-gnu)"
+  },
+  "frozen_installation": {
+    "root_log": {
+      "path": "/tmp/eq-session-root-frozen-20261016.log",
+      "sha256": "7dfbd80cec3c386210c2c50fe7981841fa53ea6f6c10a85a5946086728ad4775",
+      "bytes": 27
+    },
+    "isolated_sync_logs": {
+      "310": {
+        "path": "/tmp/eq-session-final-py310-sync-20261016.log",
+        "sha256": "d02797173581df0c1b39f3901a722a80e3ea9d11993ef2a728d25dd7498aec40",
+        "bytes": 1145
+      },
+      "311": {
+        "path": "/tmp/eq-session-final-py311-sync-20261016.log",
+        "sha256": "7b2c717b35b608f3d4ecdee6e5ccd8879a3ad15eea1fde85821421991fda77e3",
+        "bytes": 1104
+      },
+      "314": {
+        "path": "/tmp/eq-session-final-py314-sync-20261016.log",
+        "sha256": "fce7b40f03e5808ffd424475e49410a13a2fbf52b64e83886f74248d0d0f5920",
+        "bytes": 1082
+      }
+    },
+    "optimizer_commit_verified_in_all_direct_url": "3ca073335b40d54e7396d258c42470dec96a4c42"
+  },
+  "slow_path": {
+    "raw_report": {
+      "path": "/tmp/eq-session-default31-20261015/comparison.json",
+      "sha256": "3c4235204aa5c5c9836de56dcafa9708a6a197b135568bf6f458228127fd7813",
+      "bytes": 216173
+    },
+    "status": "passed",
+    "real_default_service": true,
+    "hold_seconds": 31.0,
+    "load_seconds": 0.3,
+    "report_seconds": 0.3,
+    "short_handshake_seconds": 0.15,
+    "nofile": 256,
+    "environment": {
+      "python": "3.14.3",
+      "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+      "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+      "installed_source": {
+        "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3ca073335b40d54e7396d258c42470dec96a4c42",
+          "requested_revision": "3ca073335b40d54e7396d258c42470dec96a4c42"
+        }
+      }
+    },
+    "success_assertions": {
+      "sessions": [
+        "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+        "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+        "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+        "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+      ],
+      "arena_idle_seconds": 31.001130051910877,
+      "portfolio_sizes": [
+        1,
+        2,
+        4,
+        8
+      ]
+    },
+    "comparison": {
+      "compared_files": [
+        "cumrets_10_TEST.csv",
+        "decision_targets.parquet",
+        "metrics_10_TEST.csv",
+        "portfolio_pnl_1.csv",
+        "portfolio_pnl_2.csv",
+        "portfolio_pnl_4.csv",
+        "portfolio_pnl_8.csv",
+        "positions_1.csv",
+        "positions_2.csv",
+        "positions_4.csv",
+        "positions_8.csv",
+        "returns_10_TEST.csv",
+        "target_weights_1.csv",
+        "target_weights_1.parquet",
+        "target_weights_2.csv",
+        "target_weights_2.parquet",
+        "target_weights_4.csv",
+        "target_weights_4.parquet",
+        "target_weights_8.csv",
+        "target_weights_8.parquet"
+      ],
+      "business_events": 44,
+      "decision_rows": 81,
+      "portfolio_sizes": [
+        1,
+        2,
+        4,
+        8
+      ],
+      "max_weight_abs_error": 0.0,
+      "max_daily_return_abs_error": 0.0,
+      "max_cash_weight_abs_error": 0.0,
+      "events": [
+        "liquidate",
+        "no_signal",
+        "target"
+      ],
+      "normalized_fields": [
+        "buffer_id",
+        "config_signature",
+        "copy_bytes",
+        "generation",
+        "mapping_validation_ms",
+        "model_time_ms",
+        "prepare_ms",
+        "protocol_version",
+        "request_id",
+        "service_epoch",
+        "session_id",
+        "shared_bytes",
+        "staging_bytes",
+        "wait_ms"
+      ],
+      "signature_rule": "SHA256 of business settings plus protocol_version; protocol differs by backend"
+    },
+    "failure_assertions": {
+      "sessions": [
+        "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+        "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+        "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+        "211889e8-cd58-40e9-b051-7fca6a3c3190"
+      ],
+      "arena_idle_seconds": 0.30100491270422935,
+      "portfolio_sizes": [
+        1,
+        2,
+        4,
+        8
+      ]
+    },
+    "success": {
+      "service_command": [
+        "/home/yhm/eq-backtest/.venv/bin/python",
+        "-m",
+        "optimizer.transport.shm.service",
+        "--socket",
+        "/tmp/eq-session-default31-20261015/shared_memory/ipc/service.sock"
+      ],
+      "fail_last": false,
+      "run_dir": "/tmp/eq-session-default31-20261015/shared_memory",
+      "nofile_requested": 256,
+      "service_baseline": {
+        "pid": 2909357,
+        "fd": 6,
+        "optimizer_fds": 0,
+        "maps": 216,
+        "optimizer_maps": 0,
+        "optimizer_mapped_bytes": 0,
+        "rss_kib": 37592
+      },
+      "service_nofile_soft": 256,
+      "returncode": 0,
+      "peaks": {
+        "client": {
+          "fd": 13,
+          "optimizer_fds": 2,
+          "maps": 777,
+          "optimizer_maps": 1,
+          "optimizer_mapped_bytes": 4096,
+          "rss_kib": 503636
+        },
+        "service": {
+          "fd": 9,
+          "optimizer_fds": 2,
+          "maps": 223,
+          "optimizer_maps": 1,
+          "optimizer_mapped_bytes": 4096,
+          "rss_kib": 38432
+        },
+        "samples": 6196,
+        "sample_interval_seconds": 0.005
+      },
+      "run_status": {
+        "status": "success",
+        "complete": true
+      },
+      "service_after_worker": {
+        "pid": 2909357,
+        "fd": 6,
+        "optimizer_fds": 0,
+        "maps": 221,
+        "optimizer_maps": 0,
+        "optimizer_mapped_bytes": 0,
+        "rss_kib": 38432
+      },
+      "service_exit": 0,
+      "socket_residual": false,
+      "assertions": {
+        "sessions": [
+          "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+          "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+          "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+          "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+        ],
+        "arena_idle_seconds": 31.001130051910877,
+        "portfolio_sizes": [
+          1,
+          2,
+          4,
+          8
+        ]
+      },
+      "worker": {
+        "status": "passed",
+        "baseline": {
+          "pid": 2909421,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 579,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 241160
+        },
+        "nofile_soft": 256,
+        "final": {
+          "pid": 2909421,
+          "fd": 12,
+          "optimizer_fds": 0,
+          "maps": 777,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 447664
+        },
+        "service_final": {
+          "pid": 2909357,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 221,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38432
+        }
+      },
+      "timeline": [
+        {
+          "event": "load_begin",
+          "unix_ns": 1792063797377859539,
+          "port_size": null,
+          "active_sessions": [],
+          "relative_seconds": 0.0
+        },
+        {
+          "event": "load_end",
+          "unix_ns": 1792063797695334921,
+          "port_size": null,
+          "active_sessions": [],
+          "relative_seconds": 0.3174753747880459
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063797696633184,
+          "port_size": null,
+          "active_sessions": [],
+          "relative_seconds": 0.31877413764595985
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063797701429424,
+          "port_size": null,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "session_id": "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+          "relative_seconds": 0.3235703855752945
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063797702294162,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "relative_seconds": 0.3244350850582123
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063797976657357,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 0.5987978428602219
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063797977889878,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "relative_seconds": 0.6000308208167553
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063798017910962,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "relative_seconds": 0.6400515735149384
+        },
+        {
+          "event": "hold_begin",
+          "unix_ns": 1792063798019145093,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "requested_seconds": 31.0,
+          "relative_seconds": 0.6412858590483665,
+          "client": {
+            "pid": 2909421,
+            "fd": 13,
+            "optimizer_fds": 2,
+            "maps": 763,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 350028
+          },
+          "service": {
+            "pid": 2909357,
+            "fd": 9,
+            "optimizer_fds": 2,
+            "maps": 222,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 38292
+          }
+        },
+        {
+          "event": "hold_end",
+          "unix_ns": 1792063829020275517,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "weight_sum": 8.0,
+          "readonly": true,
+          "relative_seconds": 31.642415910959244,
+          "client": {
+            "pid": 2909421,
+            "fd": 13,
+            "optimizer_fds": 2,
+            "maps": 763,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 350164
+          },
+          "service": {
+            "pid": 2909357,
+            "fd": 9,
+            "optimizer_fds": 2,
+            "maps": 222,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 38292
+          }
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063829023166373,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "relative_seconds": 31.645307313650846
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063829024110374,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+          "buffer_id": "c089e8612aea5fc853b0f6e13e764200",
+          "request_id": null,
+          "relative_seconds": 31.64625135809183
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063829025202321,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "message_type": "RELEASE",
+          "session_id": "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+          "buffer_id": "c089e8612aea5fc853b0f6e13e764200",
+          "request_id": null,
+          "relative_seconds": 31.64734325185418
+        },
+        {
+          "event": "released",
+          "unix_ns": 1792063829026287247,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "relative_seconds": 31.648428179323673
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063829027139335,
+          "port_size": 1,
+          "active_sessions": [
+            "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c"
+          ],
+          "session_id": "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+          "relative_seconds": 31.649280317127705
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063829027934802,
+          "port_size": 1,
+          "active_sessions": [],
+          "session_id": "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+          "relative_seconds": 31.650075752288103
+        },
+        {
+          "event": "report_begin",
+          "unix_ns": 1792063829028715678,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 31.650856651365757
+        },
+        {
+          "event": "plot_begin",
+          "unix_ns": 1792063829048023921,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 31.6701646335423
+        },
+        {
+          "event": "plot_end",
+          "unix_ns": 1792063829752348896,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 32.37448924779892
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063829754135206,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 32.376276191323996
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063829757969704,
+          "port_size": 1,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "session_id": "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+          "relative_seconds": 32.380110658705235
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063829758803112,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "relative_seconds": 32.380944054573774
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063829776681297,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 32.39882218837738
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063829777714562,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "relative_seconds": 32.39985553175211
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063829800585184,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "relative_seconds": 32.42272610589862
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063829802535229,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "relative_seconds": 32.42467615380883
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063829803455930,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+          "buffer_id": "3b43970a9b4e654c6ee64b6732b275f4",
+          "request_id": null,
+          "relative_seconds": 32.42559687420726
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063829804435593,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "message_type": "RELEASE",
+          "session_id": "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+          "buffer_id": "3b43970a9b4e654c6ee64b6732b275f4",
+          "request_id": null,
+          "relative_seconds": 32.42657658457756
+        },
+        {
+          "event": "released",
+          "unix_ns": 1792063829805448586,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "relative_seconds": 32.42758957669139
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063829806275894,
+          "port_size": 2,
+          "active_sessions": [
+            "893c1feb-1f50-434a-ae20-9cbe6b08eee4"
+          ],
+          "session_id": "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+          "relative_seconds": 32.42841686680913
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063829807157913,
+          "port_size": 2,
+          "active_sessions": [],
+          "session_id": "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+          "relative_seconds": 32.42929884418845
+        },
+        {
+          "event": "report_begin",
+          "unix_ns": 1792063829808024802,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 32.430165745317936
+        },
+        {
+          "event": "plot_begin",
+          "unix_ns": 1792063829823689394,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 32.445830296725035
+        },
+        {
+          "event": "plot_end",
+          "unix_ns": 1792063830556975954,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 33.17911644652486
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063830558879088,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 33.181019850075245
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063830563446420,
+          "port_size": 2,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "session_id": "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+          "relative_seconds": 33.18558740243316
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063830564374071,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "relative_seconds": 33.186515025794506
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063830583995025,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 33.20613592863083
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063830585130943,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "relative_seconds": 33.20727188512683
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063830607977864,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "relative_seconds": 33.23011872544885
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063830610219759,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "relative_seconds": 33.23236062005162
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063830611243753,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+          "buffer_id": "990b0017c4b8e2bd605e4d04087c510a",
+          "request_id": null,
+          "relative_seconds": 33.23338470607996
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063830612321709,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "message_type": "RELEASE",
+          "session_id": "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+          "buffer_id": "990b0017c4b8e2bd605e4d04087c510a",
+          "request_id": null,
+          "relative_seconds": 33.234462700784206
+        },
+        {
+          "event": "released",
+          "unix_ns": 1792063830613466967,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "relative_seconds": 33.23560794815421
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063830614386318,
+          "port_size": 4,
+          "active_sessions": [
+            "569cdb21-a266-40dd-95f2-4dd80e8d22d7"
+          ],
+          "session_id": "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+          "relative_seconds": 33.236527260392904
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063830615267747,
+          "port_size": 4,
+          "active_sessions": [],
+          "session_id": "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+          "relative_seconds": 33.23740869760513
+        },
+        {
+          "event": "report_begin",
+          "unix_ns": 1792063830616173217,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 33.23831417039037
+        },
+        {
+          "event": "plot_begin",
+          "unix_ns": 1792063830632170031,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 33.25431075319648
+        },
+        {
+          "event": "plot_end",
+          "unix_ns": 1792063831335631247,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 33.95777189731598
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063831337338264,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 33.95947878435254
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063831341656828,
+          "port_size": 4,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "session_id": "f9281eec-bf02-4011-84d9-06c0e0307f1e",
+          "relative_seconds": 33.96379778906703
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063831342574758,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "relative_seconds": 33.96471572294831
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063831362550164,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 33.98469107598066
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063831363570258,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "relative_seconds": 33.985711220651865
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063831385901823,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "relative_seconds": 34.00804276391864
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063831387851737,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "relative_seconds": 34.00999267026782
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063831388801749,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "f9281eec-bf02-4011-84d9-06c0e0307f1e",
+          "buffer_id": "6657fa4dd79e5df092c3a352710a133b",
+          "request_id": null,
+          "relative_seconds": 34.010942690074444
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063831389776392,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "message_type": "RELEASE",
+          "session_id": "f9281eec-bf02-4011-84d9-06c0e0307f1e",
+          "buffer_id": "6657fa4dd79e5df092c3a352710a133b",
+          "request_id": null,
+          "relative_seconds": 34.011917386204004
+        },
+        {
+          "event": "released",
+          "unix_ns": 1792063831390827907,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "relative_seconds": 34.01296887919307
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063831391745967,
+          "port_size": 8,
+          "active_sessions": [
+            "f9281eec-bf02-4011-84d9-06c0e0307f1e"
+          ],
+          "session_id": "f9281eec-bf02-4011-84d9-06c0e0307f1e",
+          "relative_seconds": 34.01388692855835
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063831392597475,
+          "port_size": 8,
+          "active_sessions": [],
+          "session_id": "f9281eec-bf02-4011-84d9-06c0e0307f1e",
+          "relative_seconds": 34.014738358557224
+        },
+        {
+          "event": "report_begin",
+          "unix_ns": 1792063831393460394,
+          "port_size": 8,
+          "active_sessions": [],
+          "relative_seconds": 34.015601336956024
+        },
+        {
+          "event": "plot_begin",
+          "unix_ns": 1792063831409081865,
+          "port_size": 8,
+          "active_sessions": [],
+          "relative_seconds": 34.03122267872095
+        },
+        {
+          "event": "plot_end",
+          "unix_ns": 1792063832115460668,
+          "port_size": 8,
+          "active_sessions": [],
+          "relative_seconds": 34.737601302564144
+        },
+        {
+          "event": "worker_final",
+          "unix_ns": 1792063833089665239,
+          "port_size": 8,
+          "active_sessions": [],
+          "relative_seconds": 35.711805768311024,
+          "client": {
+            "pid": 2909421,
+            "fd": 12,
+            "optimizer_fds": 0,
+            "maps": 777,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 447664
+          },
+          "service": {
+            "pid": 2909357,
+            "fd": 6,
+            "optimizer_fds": 0,
+            "maps": 221,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 38432
+          }
+        }
+      ],
+      "per_session": [
+        {
+          "port_size": 1,
+          "session_id": "402cfd7c-58aa-4610-a6a4-a2bbecc70c2c",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1,
+            "RELEASE": 1
+          }
+        },
+        {
+          "port_size": 2,
+          "session_id": "893c1feb-1f50-434a-ae20-9cbe6b08eee4",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1,
+            "RELEASE": 1
+          }
+        },
+        {
+          "port_size": 4,
+          "session_id": "569cdb21-a266-40dd-95f2-4dd80e8d22d7",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1,
+            "RELEASE": 1
+          }
+        },
+        {
+          "port_size": 8,
+          "session_id": "f9281eec-bf02-4011-84d9-06c0e0307f1e",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1,
+            "RELEASE": 1
+          }
+        }
+      ],
+      "total_control_counts": {
+        "HELLO": 4,
+        "HEALTH": 4,
+        "CAPABILITIES": 4,
+        "NEGOTIATE": 4,
+        "BEGIN_ARENA": 4,
+        "OPTIMIZE_INTO_ARENA": 32,
+        "FINALIZE_ARENA": 4,
+        "CONSUMED": 4,
+        "RELEASE": 4
+      },
+      "raw_timeline": {
+        "path": "/tmp/eq-session-default31-20261015/shared_memory/timeline.jsonl",
+        "sha256": "91ba06e8713d0b0e42dba219242df87b2a0e01f534fcfafa347fe1cbe75c0e68",
+        "bytes": 64864
+      }
+    },
+    "failure": {
+      "service_command": [
+        "/home/yhm/eq-backtest/.venv/bin/python",
+        "-m",
+        "optimizer.transport.shm.service",
+        "--socket",
+        "/tmp/eq-session-default31-20261015/failed_shared_memory/ipc/service.sock"
+      ],
+      "fail_last": true,
+      "run_dir": "/tmp/eq-session-default31-20261015/failed_shared_memory",
+      "nofile_requested": 256,
+      "service_baseline": {
+        "pid": 2911757,
+        "fd": 6,
+        "optimizer_fds": 0,
+        "maps": 216,
+        "optimizer_maps": 0,
+        "optimizer_mapped_bytes": 0,
+        "rss_kib": 35440
+      },
+      "service_nofile_soft": 256,
+      "returncode": 1,
+      "peaks": {
+        "client": {
+          "fd": 14,
+          "optimizer_fds": 2,
+          "maps": 773,
+          "optimizer_maps": 1,
+          "optimizer_mapped_bytes": 4096,
+          "rss_kib": 525116
+        },
+        "service": {
+          "fd": 9,
+          "optimizer_fds": 2,
+          "maps": 223,
+          "optimizer_maps": 1,
+          "optimizer_mapped_bytes": 4096,
+          "rss_kib": 36344
+        },
+        "samples": 773,
+        "sample_interval_seconds": 0.005
+      },
+      "run_status": {
+        "status": "failed",
+        "complete": false,
+        "error_type": "OptimizerClientError",
+        "error": "failed to release 1 optimizer lease(s)",
+        "cleanup_status": "failed",
+        "cleanup_errors": [
+          {
+            "error_type": "OptimizerClientError",
+            "error": "optimizer control connection failed; session was abandoned",
+            "buffer_id": "7d278b3b197fd3bcf45cfe234f088ac8",
+            "retryable": false
+          }
+        ]
+      },
+      "service_after_worker": {
+        "pid": 2911757,
+        "sampling_error": "[Errno 13] Permission denied: '/proc/2911757/fd'"
+      },
+      "service_exit": 0,
+      "socket_residual": false,
+      "assertions": {
+        "sessions": [
+          "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+          "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+          "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+          "211889e8-cd58-40e9-b051-7fca6a3c3190"
+        ],
+        "arena_idle_seconds": 0.30100491270422935,
+        "portfolio_sizes": [
+          1,
+          2,
+          4,
+          8
+        ]
+      },
+      "worker": {
+        "status": "failed",
+        "baseline": {
+          "pid": 2911822,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 576,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 253228
+        },
+        "nofile_soft": 256,
+        "error_type": "OptimizerClientError",
+        "error": "failed to release 1 optimizer lease(s)",
+        "traceback": "Traceback (most recent call last):\n  File \"/home/yhm/eq-backtest/scripts/verify_optimizer_session_lifetime.py\", line 160, in _worker\n    runner.run()\n    ~~~~~~~~~~^^\n  File \"/home/yhm/eq-backtest/run.py\", line 672, in run\n    _run(lambda: create_optimizer_client(cfg.OPTIMIZER))\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/yhm/eq-backtest/run.py\", line 589, in _run\n    result = _mode_result(\n        pool, mode, port_size=port_size, output_dir=output_dir,\n        optimizer_client=optimizer_client,\n    )\n  File \"/home/yhm/eq-backtest/run.py\", line 539, in _mode_result\n    close_optimizer_plan(optimizer_plan, primary_error)\n    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/yhm/eq-backtest/scripts/verify_optimizer_session_lifetime.py\", line 137, in release\n    real_release(plan, primary)\n    ~~~~~~~~~~~~^^^^^^^^^^^^^^^\n  File \"/home/yhm/eq-backtest/optimizer_adapter.py\", line 85, in close_optimizer_plan\n    plan.close()\n    ~~~~~~~~~~^^\n  File \"/home/yhm/eq-backtest/optimizer_adapter.py\", line 79, in close\n    raise error\noptimizer.client.OptimizerClientError: failed to release 1 optimizer lease(s)\n",
+        "final": {
+          "pid": 2911822,
+          "fd": 11,
+          "optimizer_fds": 0,
+          "maps": 771,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 500516
+        },
+        "service_final": {
+          "pid": 2911757,
+          "sampling_error": "[Errno 13] Permission denied: '/proc/2911757/fd'"
+        }
+      },
+      "timeline": [
+        {
+          "event": "load_begin",
+          "unix_ns": 1792063834660155403,
+          "port_size": null,
+          "active_sessions": [],
+          "relative_seconds": 0.0
+        },
+        {
+          "event": "load_end",
+          "unix_ns": 1792063834979655562,
+          "port_size": null,
+          "active_sessions": [],
+          "relative_seconds": 0.31950048729777336
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063834980840541,
+          "port_size": null,
+          "active_sessions": [],
+          "relative_seconds": 0.32068589702248573
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063834985581309,
+          "port_size": null,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "session_id": "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+          "relative_seconds": 0.325426671653986
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063834986451238,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "relative_seconds": 0.3262965530157089
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063835267607459,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 0.6074524968862534
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063835268820349,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "relative_seconds": 0.6086656153202057
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063835309338240,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "relative_seconds": 0.6491832658648491
+        },
+        {
+          "event": "hold_begin",
+          "unix_ns": 1792063835310583812,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "requested_seconds": 0.3,
+          "relative_seconds": 0.650429155677557,
+          "client": {
+            "pid": 2911822,
+            "fd": 13,
+            "optimizer_fds": 2,
+            "maps": 757,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 404536
+          },
+          "service": {
+            "pid": 2911757,
+            "fd": 9,
+            "optimizer_fds": 2,
+            "maps": 222,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 36144
+          }
+        },
+        {
+          "event": "hold_end",
+          "unix_ns": 1792063835611588874,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "weight_sum": 8.0,
+          "readonly": true,
+          "relative_seconds": 0.9514340683817863,
+          "client": {
+            "pid": 2911822,
+            "fd": 13,
+            "optimizer_fds": 2,
+            "maps": 757,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 404536
+          },
+          "service": {
+            "pid": 2911757,
+            "fd": 9,
+            "optimizer_fds": 2,
+            "maps": 222,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 4096,
+            "rss_kib": 36144
+          }
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063835613964743,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "relative_seconds": 0.9538100957870483
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063835614883664,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+          "buffer_id": "d9a3e619aa1f0fd8fabb44a02cf9b471",
+          "request_id": null,
+          "relative_seconds": 0.9547290280461311
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063835615972150,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "message_type": "RELEASE",
+          "session_id": "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+          "buffer_id": "d9a3e619aa1f0fd8fabb44a02cf9b471",
+          "request_id": null,
+          "relative_seconds": 0.9558175168931484
+        },
+        {
+          "event": "released",
+          "unix_ns": 1792063835617029705,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "relative_seconds": 0.9568751193583012
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063835617831822,
+          "port_size": 1,
+          "active_sessions": [
+            "391c3600-4b99-4b30-9ebc-7b92fc11b7cf"
+          ],
+          "session_id": "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+          "relative_seconds": 0.9576771967113018
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063835618633459,
+          "port_size": 1,
+          "active_sessions": [],
+          "session_id": "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+          "relative_seconds": 0.9584788456559181
+        },
+        {
+          "event": "report_begin",
+          "unix_ns": 1792063835619424005,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 0.9592693671584129
+        },
+        {
+          "event": "plot_begin",
+          "unix_ns": 1792063835638042446,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 0.9778877608478069
+        },
+        {
+          "event": "plot_end",
+          "unix_ns": 1792063836347739370,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 1.6875842958688736
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063836349504299,
+          "port_size": 1,
+          "active_sessions": [],
+          "relative_seconds": 1.689349565654993
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063836353471361,
+          "port_size": 1,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "session_id": "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+          "relative_seconds": 1.6933167688548565
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063836354342390,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "relative_seconds": 1.6941877827048302
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063836372438383,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 1.7122837379574776
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063836373385915,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "relative_seconds": 1.7132313065230846
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063836395508192,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "relative_seconds": 1.7353535369038582
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063836397484868,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "relative_seconds": 1.737330213189125
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063836398412359,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+          "buffer_id": "e6716e92803826cd5f127012fbe0c879",
+          "request_id": null,
+          "relative_seconds": 1.738257735967636
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063836399395651,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "message_type": "RELEASE",
+          "session_id": "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+          "buffer_id": "e6716e92803826cd5f127012fbe0c879",
+          "request_id": null,
+          "relative_seconds": 1.739241074770689
+        },
+        {
+          "event": "released",
+          "unix_ns": 1792063836400399085,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "relative_seconds": 1.7402445003390312
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063836401246023,
+          "port_size": 2,
+          "active_sessions": [
+            "e7df05ee-345c-4c1e-acb2-8526aa708d27"
+          ],
+          "session_id": "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+          "relative_seconds": 1.7410914078354836
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063836402081881,
+          "port_size": 2,
+          "active_sessions": [],
+          "session_id": "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+          "relative_seconds": 1.7419272474944592
+        },
+        {
+          "event": "report_begin",
+          "unix_ns": 1792063836402872487,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 1.742717880755663
+        },
+        {
+          "event": "plot_begin",
+          "unix_ns": 1792063836418469137,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 1.7583144642412663
+        },
+        {
+          "event": "plot_end",
+          "unix_ns": 1792063837128305646,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 2.4681505411863327
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063837130172618,
+          "port_size": 2,
+          "active_sessions": [],
+          "relative_seconds": 2.4700178429484367
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063837134578235,
+          "port_size": 2,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "session_id": "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+          "relative_seconds": 2.474423471838236
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063837135505916,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "relative_seconds": 2.4753511138260365
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063837155624396,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 2.4954697005450726
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063837156640190,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "relative_seconds": 2.4964855760335922
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063837179251884,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "relative_seconds": 2.519097238779068
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063837181195229,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "relative_seconds": 2.521040592342615
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063837182201302,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+          "buffer_id": "4d2873cc21a550371adc04bb5be6b0c6",
+          "request_id": null,
+          "relative_seconds": 2.5220466554164886
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063837183260788,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "message_type": "RELEASE",
+          "session_id": "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+          "buffer_id": "4d2873cc21a550371adc04bb5be6b0c6",
+          "request_id": null,
+          "relative_seconds": 2.5231061838567257
+        },
+        {
+          "event": "released",
+          "unix_ns": 1792063837184345314,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "relative_seconds": 2.524190727621317
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063837185259654,
+          "port_size": 4,
+          "active_sessions": [
+            "a19236e1-1b8b-42d6-9dbf-9544be64c422"
+          ],
+          "session_id": "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+          "relative_seconds": 2.525105021893978
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063837186183155,
+          "port_size": 4,
+          "active_sessions": [],
+          "session_id": "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+          "relative_seconds": 2.5260285399854183
+        },
+        {
+          "event": "report_begin",
+          "unix_ns": 1792063837187074145,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 2.526919513940811
+        },
+        {
+          "event": "plot_begin",
+          "unix_ns": 1792063837202526230,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 2.542371556162834
+        },
+        {
+          "event": "plot_end",
+          "unix_ns": 1792063837884709407,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 3.2245545610785484
+        },
+        {
+          "event": "connect_begin",
+          "unix_ns": 1792063837886355662,
+          "port_size": 4,
+          "active_sessions": [],
+          "relative_seconds": 3.2262009382247925
+        },
+        {
+          "event": "connected",
+          "unix_ns": 1792063837890340084,
+          "port_size": 4,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "session_id": "211889e8-cd58-40e9-b051-7fca6a3c3190",
+          "relative_seconds": 3.23018516972661
+        },
+        {
+          "event": "prepare_begin",
+          "unix_ns": 1792063837891182243,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "relative_seconds": 3.2310276180505753
+        },
+        {
+          "event": "prepared",
+          "unix_ns": 1792063837909407400,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "lease_count": 1,
+          "calls": 11,
+          "copy_bytes": 0,
+          "relative_seconds": 3.249252736568451
+        },
+        {
+          "event": "simulate_begin",
+          "unix_ns": 1792063837910345821,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "relative_seconds": 3.250191207975149
+        },
+        {
+          "event": "simulate_end",
+          "unix_ns": 1792063837931842498,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "relative_seconds": 3.2716878429055214
+        },
+        {
+          "event": "service_termination_begin",
+          "unix_ns": 1792063837932823680,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "relative_seconds": 3.272669054567814
+        },
+        {
+          "event": "service_terminated",
+          "unix_ns": 1792063838090798706,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "relative_seconds": 3.43064409121871
+        },
+        {
+          "event": "release_begin",
+          "unix_ns": 1792063838092944457,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "relative_seconds": 3.432789783924818
+        },
+        {
+          "event": "control_send",
+          "unix_ns": 1792063838093928640,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "message_type": "CONSUMED",
+          "session_id": "211889e8-cd58-40e9-b051-7fca6a3c3190",
+          "buffer_id": "7d278b3b197fd3bcf45cfe234f088ac8",
+          "request_id": null,
+          "relative_seconds": 3.4337740056216717
+        },
+        {
+          "event": "close_begin",
+          "unix_ns": 1792063838094847361,
+          "port_size": 8,
+          "active_sessions": [
+            "211889e8-cd58-40e9-b051-7fca6a3c3190"
+          ],
+          "session_id": "211889e8-cd58-40e9-b051-7fca6a3c3190",
+          "relative_seconds": 3.43469275534153
+        },
+        {
+          "event": "closed",
+          "unix_ns": 1792063838095721140,
+          "port_size": 8,
+          "active_sessions": [],
+          "session_id": "211889e8-cd58-40e9-b051-7fca6a3c3190",
+          "relative_seconds": 3.4355665035545826
+        },
+        {
+          "event": "release_failed",
+          "unix_ns": 1792063838097132497,
+          "port_size": 8,
+          "active_sessions": [],
+          "error_type": "OptimizerClientError",
+          "error": "failed to release 1 optimizer lease(s)",
+          "relative_seconds": 3.436977870762348
+        },
+        {
+          "event": "worker_final",
+          "unix_ns": 1792063838164946577,
+          "port_size": 8,
+          "active_sessions": [],
+          "relative_seconds": 3.504791371524334,
+          "client": {
+            "pid": 2911822,
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 771,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 500516
+          },
+          "service": {
+            "pid": 2911757,
+            "sampling_error": "[Errno 13] Permission denied: '/proc/2911757/fd'"
+          }
+        }
+      ],
+      "per_session": [
+        {
+          "port_size": 1,
+          "session_id": "391c3600-4b99-4b30-9ebc-7b92fc11b7cf",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1,
+            "RELEASE": 1
+          }
+        },
+        {
+          "port_size": 2,
+          "session_id": "e7df05ee-345c-4c1e-acb2-8526aa708d27",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1,
+            "RELEASE": 1
+          }
+        },
+        {
+          "port_size": 4,
+          "session_id": "a19236e1-1b8b-42d6-9dbf-9544be64c422",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1,
+            "RELEASE": 1
+          }
+        },
+        {
+          "port_size": 8,
+          "session_id": "211889e8-cd58-40e9-b051-7fca6a3c3190",
+          "control_counts": {
+            "HEALTH": 1,
+            "CAPABILITIES": 1,
+            "NEGOTIATE": 1,
+            "BEGIN_ARENA": 1,
+            "OPTIMIZE_INTO_ARENA": 8,
+            "FINALIZE_ARENA": 1,
+            "CONSUMED": 1
+          }
+        }
+      ],
+      "total_control_counts": {
+        "HELLO": 4,
+        "HEALTH": 4,
+        "CAPABILITIES": 4,
+        "NEGOTIATE": 4,
+        "BEGIN_ARENA": 4,
+        "OPTIMIZE_INTO_ARENA": 32,
+        "FINALIZE_ARENA": 4,
+        "CONSUMED": 4,
+        "RELEASE": 3
+      },
+      "raw_timeline": {
+        "path": "/tmp/eq-session-default31-20261015/failed_shared_memory/timeline.jsonl",
+        "sha256": "452f5f2ce0e6c384e087e19953904e0b3a14dab98959fa085b2588ec2c6c7784",
+        "bytes": 63986
+      }
+    },
+    "sampling_limit": "FD/RSS/maps peaks are observed at 5ms polling intervals, not continuous maxima. The intentionally terminated service has PermissionDenied in the post-exit /proc sample; its post-exit FD/maps are not reported as measured zeros. Successful live-service terminal samples and all client terminal samples are measured."
+  },
+  "pressure_2000_days": {
+    "raw_report": {
+      "path": "/tmp/eq-session-pressure-20261015.json",
+      "sha256": "00d0d883ecf8f2cdf6cf25c71b593b1266892fd314811ab8a7b7441b25000fee",
+      "bytes": 5858
+    },
+    "experiment": "real CLI long-horizon parity",
+    "target_days": 2000,
+    "market_days": 2043,
+    "nofile": 256,
+    "expected_events": {
+      "target": 2000,
+      "no_signal": 21,
+      "liquidate": 21
+    },
+    "max_shared_bytes": null,
+    "environment": {
+      "python": "3.14.3",
+      "kernel": "4.18.0-348.7.1.el8_5.x86_64",
+      "optimizer_file": "/home/yhm/eq-backtest/.venv/lib/python3.14/site-packages/optimizer/__init__.py",
+      "dependencies": {
+        "numpy": "2.4.4",
+        "numba": "0.65.0",
+        "pandas": "3.0.1",
+        "polars": "1.39.3"
+      },
+      "installed_source": {
+        "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3ca073335b40d54e7396d258c42470dec96a4c42",
+          "requested_revision": "3ca073335b40d54e7396d258c42470dec96a4c42"
+        }
+      }
+    },
+    "runs": {
+      "inprocess": {
+        "returncode": 0,
+        "elapsed_seconds": 3.861078180372715,
+        "peaks": {
+          "client": {
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 770,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 562084
+          },
+          "service": {
+            "fd": 6,
+            "optimizer_fds": 0,
+            "maps": 215,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 37788
+          },
+          "samples": 657,
+          "sample_interval_seconds": 0.005
+        },
+        "run_status": {
+          "status": "success",
+          "complete": true
+        },
+        "child_resources": {
+          "baseline": {
+            "pid": 2907460,
+            "fd": 5,
+            "optimizer_fds": 0,
+            "maps": 46,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 20080
+          },
+          "rlimit_nofile": [
+            256,
+            262144
+          ],
+          "final": {
+            "pid": 2907460,
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 769,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 518040
+          }
+        },
+        "service_cleanup_wait_seconds": 0.0003358796238899231,
+        "service_after_client_exit": {
+          "pid": 2907394,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 215,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 37788
+        },
+        "output_files": [
+          "output_long_10_daily/cumrets_10_TEST.csv",
+          "output_long_10_daily/decision_targets.parquet",
+          "output_long_10_daily/metrics_10_TEST.csv",
+          "output_long_10_daily/optimizer_calls.jsonl",
+          "output_long_10_daily/portfolio_pnl_4.csv",
+          "output_long_10_daily/positions_4.csv",
+          "output_long_10_daily/returns_10_TEST.csv",
+          "output_long_10_daily/target_weights_4.csv",
+          "output_long_10_daily/target_weights_4.parquet"
+        ],
+        "metrics_files": [
+          "output_long_10_daily/metrics_10_TEST.csv"
+        ]
+      },
+      "shared_memory": {
+        "returncode": 0,
+        "elapsed_seconds": 4.245026241987944,
+        "peaks": {
+          "client": {
+            "fd": 12,
+            "optimizer_fds": 2,
+            "maps": 765,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 65536,
+            "rss_kib": 496204
+          },
+          "service": {
+            "fd": 9,
+            "optimizer_fds": 2,
+            "maps": 221,
+            "optimizer_maps": 1,
+            "optimizer_mapped_bytes": 65536,
+            "rss_kib": 38912
+          },
+          "samples": 719,
+          "sample_interval_seconds": 0.005
+        },
+        "run_status": {
+          "status": "success",
+          "complete": true
+        },
+        "child_resources": {
+          "baseline": {
+            "pid": 2908160,
+            "fd": 5,
+            "optimizer_fds": 0,
+            "maps": 46,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 20000
+          },
+          "rlimit_nofile": [
+            256,
+            262144
+          ],
+          "final": {
+            "pid": 2908160,
+            "fd": 11,
+            "optimizer_fds": 0,
+            "maps": 764,
+            "optimizer_maps": 0,
+            "optimizer_mapped_bytes": 0,
+            "rss_kib": 452228
+          }
+        },
+        "service_cleanup_wait_seconds": 0.00032246485352516174,
+        "service_after_client_exit": {
+          "pid": 2907394,
+          "fd": 6,
+          "optimizer_fds": 0,
+          "maps": 218,
+          "optimizer_maps": 0,
+          "optimizer_mapped_bytes": 0,
+          "rss_kib": 38908
+        },
+        "output_files": [
+          "output_long_10_daily/cumrets_10_TEST.csv",
+          "output_long_10_daily/decision_targets.parquet",
+          "output_long_10_daily/metrics_10_TEST.csv",
+          "output_long_10_daily/optimizer_calls.jsonl",
+          "output_long_10_daily/portfolio_pnl_4.csv",
+          "output_long_10_daily/positions_4.csv",
+          "output_long_10_daily/returns_10_TEST.csv",
+          "output_long_10_daily/target_weights_4.csv",
+          "output_long_10_daily/target_weights_4.parquet"
+        ],
+        "metrics_files": [
+          "output_long_10_daily/metrics_10_TEST.csv"
+        ]
+      }
+    },
+    "status": "passed",
+    "service_baseline": {
+      "pid": 2907394,
+      "fd": 6,
+      "optimizer_fds": 0,
+      "maps": 215,
+      "optimizer_maps": 0,
+      "optimizer_mapped_bytes": 0,
+      "rss_kib": 37788
+    },
+    "comparison": {
+      "compared_files": [
+        "cumrets_10_TEST.csv",
+        "decision_targets.parquet",
+        "metrics_10_TEST.csv",
+        "portfolio_pnl_4.csv",
+        "positions_4.csv",
+        "returns_10_TEST.csv",
+        "target_weights_4.csv",
+        "target_weights_4.parquet"
+      ],
+      "events": {
+        "target": 2000,
+        "no_signal": 21,
+        "liquidate": 21
+      },
+      "decision_rows": 7937,
+      "max_weight_abs_error": 0.0,
+      "max_daily_return_abs_error": 0.0,
+      "max_cash_weight_abs_error": 0.0
+    },
+    "service_exit": 0,
+    "socket_residual": false
+  },
+  "packages": {
+    "status": "passed",
+    "module_count": 17,
+    "modules": [
+      "optimizer/__init__.py",
+      "optimizer/api.py",
+      "optimizer/client.py",
+      "optimizer/contracts/__init__.py",
+      "optimizer/contracts/request.py",
+      "optimizer/models/__init__.py",
+      "optimizer/models/equal_weight.py",
+      "optimizer/registry.py",
+      "optimizer/transport/__init__.py",
+      "optimizer/transport/shm/__init__.py",
+      "optimizer/transport/shm/arena.py",
+      "optimizer/transport/shm/arena_client.py",
+      "optimizer/transport/shm/buffers.py",
+      "optimizer/transport/shm/client.py",
+      "optimizer/transport/shm/protocol.py",
+      "optimizer/transport/shm/server.py",
+      "optimizer/transport/shm/service.py"
+    ],
+    "artifacts": {
+      "optimizer-0.2.0-py3-none-any.whl": "e71a346c7a509ed074c1c66de5cde858852aa189e384695ce0af24a5632a9a9c",
+      "optimizer-0.2.0.tar.gz": "415c42faa785c6a3ea86630e99338daa14611b1c9d87389feff5d7bddee8b34c"
+    }
+  },
+  "installed_wheel_checks": {
+    "310": {
+      "status": "passed",
+      "python": "3.10.21",
+      "numpy": "2.2.6",
+      "package": "/tmp/optimizer-session-wheel310/lib/python3.10/site-packages/optimizer/__init__.py",
+      "version": "0.2.0"
+    },
+    "311": {
+      "status": "passed",
+      "python": "3.11.9",
+      "numpy": "2.4.6",
+      "package": "/tmp/optimizer-session-wheel311/lib/python3.11/site-packages/optimizer/__init__.py",
+      "version": "0.2.0"
+    },
+    "314": {
+      "status": "passed",
+      "python": "3.14.3",
+      "numpy": "2.5.4",
+      "package": "/tmp/optimizer-session-wheel314/lib/python3.14/site-packages/optimizer/__init__.py",
+      "version": "0.2.0"
+    }
+  },
+  "legacy_single_request": {
+    "status": "passed",
+    "source": {
+      "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "988a1381f0030d93870c36cacddf71efc1815d3f",
+        "requested_revision": "988a1381f0030d93870c36cacddf71efc1815d3f"
+      }
+    },
+    "legacy_single_optimize": true,
+    "consumed_release": true,
+    "repeat_release": true,
+    "readonly_zero_copy": true,
+    "service_exit": 0,
+    "socket_residual": false,
+    "service_source": {
+      "url": "ssh://git@github.com/Me2yhm/optimizer.git",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "3ca073335b40d54e7396d258c42470dec96a4c42",
+        "requested_revision": "3ca073335b40d54e7396d258c42470dec96a4c42"
+      }
+    }
+  },
+  "ci": {
+    "optimizer": {
+      "head": "3ca073335b40d54e7396d258c42470dec96a4c42",
+      "url": "https://github.com/Me2yhm/optimizer/actions/runs/38726994944",
+      "status": "success",
+      "jobs": [
+        {
+          "id": 116395208444,
+          "name": "linux (3.14)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 38726994944,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install locked dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Record environment and test Core and SHM",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Build and test installed wheel outside checkout",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ]
+        },
+        {
+          "id": 116395208675,
+          "name": "linux (3.10)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 38726994944,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install locked dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Record environment and test Core and SHM",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Build and test installed wheel outside checkout",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ]
+        },
+        {
+          "id": 116395208695,
+          "name": "linux (3.11)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 38726994944,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install locked dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Record environment and test Core and SHM",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Build and test installed wheel outside checkout",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ]
+        }
+      ],
+      "versions": [
+        "3.10.22",
+        "3.11.17",
+        "3.14.8"
+      ],
+      "tests_each": 64
+    },
+    "eq_backtest": {
+      "code_head": "58483b1e026c93dbcf711ea52990ad96bf2d5df0",
+      "url": "https://github.com/Me2yhm/eq_backtest/actions/runs/38836658164",
+      "event": "pull_request",
+      "base": "5min-old",
+      "conclusion": "failure",
+      "integration_tests": "not run",
+      "jobs": [
+        {
+          "id": 116767201587,
+          "name": "linux",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 38836658164,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install uv",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install frozen private Git dependency",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 5
+            },
+            {
+              "name": "Full suite with SHM and real CLI comparison",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 6
+            },
+            {
+              "name": "Preserve CLI evidence",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Post Run actions/setup-python@v5",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Post Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15
+            }
+          ]
+        }
+      ],
+      "authorization_evidence": [
+        "2026-10-16T01:43:44.2066766Z \u001b[36;1m    sys.exit(\"CI dependency authorization missing: configure read-only OPTIMIZER_READ_TOKEN for Me2yhm/optimizer; integration has not run.\")\u001b[0m",
+        "2026-10-16T01:43:44.2424028Z CI dependency authorization missing: configure read-only OPTIMIZER_READ_TOKEN for Me2yhm/optimizer; integration has not run.",
+        "2026-10-16T01:43:44.2490173Z ##[error]Process completed with exit code 1."
+      ],
+      "accepted_limitation": true,
+      "main_pr_and_push": "configuration/event matching checked; actual main event awaits authorized merge"
+    }
+  },
+  "static_checks": {
+    "compileall": "passed: both repositories production modules, tests and verification scripts",
+    "ruff": "passed: E9,F63,F7,F82,F401 on changed consumer Python files and optimizer package/tests/installed-package script",
+    "diff_check": "passed: baseline..HEAD and working diff in both repositories",
+    "artifact_review": "No credentials, external data, run directories, parquet outputs, charts or raw temporary logs included; only compact evidence and source changes."
+  },
+  "review": {
+    "independent_agent": "final_review",
+    "production_blockers": 0,
+    "ci_and_field_documentation_blockers": 0,
+    "service_exit_assertion": "added and both existing real-default cases revalidated",
+    "nonblocking_observation": "Absolute-handshake test uses a 150ms deadline and a 90ms pause. All three local and all three actual CI interpreters passed; under unusually high scheduling delay this test may be timing-sensitive."
+  },
+  "limits": [
+    "Consumer GitHub integration tests have not run: missing private dependency token, explicitly accepted by user.",
+    "main PR/push event filters validated locally; actual main dispatch is pending a future authorized merge. Only a real 5min-old-target PR was opened.",
+    "Synthetic functional validation does not measure production dataset performance.",
+    "Optimizer PR #2 remains open; consumer pins its branch commit. A future squash merge requires repinning to the resulting master commit plus frozen installation/key regression checks."
+  ],
+  "validated_source_files": {
+    ".github/workflows/optimizer-integration.yml": "3091a2142ae8eba6804f886593e60e5abfd83fe8356fdf9f33b3957b49bfbcc9",
+    "doc/README.md": "7882ba85d8c123868bcbd28181ef80fa250bbf54c8c8a53cfad072b4d7a2b49e",
+    "pyproject.toml": "cd11491f3bc7e38db6e74833dcd323fcae1ade8140cc1e14ef164d33753fb956",
+    "run.py": "66399c5138950d9bed63054c014515b7f7da37f7437e96c2e61540218045d0bc",
+    "scripts/verify_optimizer_session_lifetime.py": "d15a6bbb7a17e70e97462bab45f3f25998c16002b84862a8289c4c4a6f035ad1",
+    "tests/test_optimizer_ci_contract.py": "4ef5ae1e74cdb265be4ec591f400f348a28c5e8eb17430cdf26ad1b4b7490e79",
+    "tests/test_optimizer_cleanup.py": "8cb0bf9edf2d27f8095486e540b6690356bc3fcba5a5d79a947783d1f424c1ce",
+    "tests/test_optimizer_cleanup_shm.py": "8956f3a67c5734214c6053dce1cb2a117de4a0a2dba8d9d2b915fb0afc73a85b",
+    "tests/test_optimizer_session_lifecycle.py": "2beca17afc0817c1d994f2b130606155dfc5a5b712d5430607faba1d8c5bd2d8",
+    "tests/test_prediction_field_semantics.py": "168eb6725941401240d4e530f5189067d84cf53d0e2e90bddaeac9d26059da44",
+    "uv.lock": "fa18b1279a61817c78e640789f49e3b5b7f40515b4eec3f44cd6cbe10c2d93bf"
+  },
+  "optimizer_source_files": {
+    "README.md": "f277945bb2a7125c9a9f47b608f33c430bd4bdfd3150dee04917793bf93a1f7f",
+    "docs/OUTPUT_ARENA.md": "c58335b6656e88169627aa49716503b16752266ebcfa97f35f91ed4e0adc4908",
+    "docs/equal-weight-shm.md": "ae4c33d915824767bd3d8a4be4c1ceaf43b1e88f152a12dc5309cc1e0dda5556",
+    "optimizer/transport/shm/server.py": "ca956c70263dd11d51f884a74387e5c0d9e29822720ce622aaa770ccf7ea6f44",
+    "tests/test_shm_session_lifetime.py": "0e98468482d9a5e485104af4dd8e088bf2a34fc9522711ff4340290843325372"
+  }
+}
