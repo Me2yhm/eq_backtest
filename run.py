@@ -74,8 +74,10 @@ def _record_client_cleanup(primary: BaseException | None, cleanup: BaseException
 
 
 @contextmanager
-def _optimizer_session(factory: OptimizerClientFactory | None, port_size: int
-                       ) -> Iterator[OptimizerClient | InProcessOptimizerClient | None]:
+def _optimizer_session(
+    factory: OptimizerClientFactory | None,
+    port_size: int,
+) -> Iterator[OptimizerClient | InProcessOptimizerClient | None]:
     if factory is None:
         yield None
         return
