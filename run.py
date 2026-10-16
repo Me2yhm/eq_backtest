@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,13 +53,59 @@ from data_loader import build_pool
 from market_cache import load_benchmark_returns
 from metrics import holding_period_stats, portfolio_metrics
 from optimizer_adapter import close_optimizer_plan, prepare_optimizer_targets
-from optimizer_client import OptimizerClient, create_optimizer_client
+from optimizer_client import InProcessOptimizerClient, OptimizerClient, create_optimizer_client
 from plotting import (
     plot_holding_periods,
     plot_metrics_table,
     plot_portfolio_results,
 )
 from portfolio import PortfolioResult, generate_portfolio
+
+
+OptimizerClientFactory = Callable[[], OptimizerClient | InProcessOptimizerClient]
+
+
+def _record_client_cleanup(primary: BaseException | None, cleanup: BaseException) -> None:
+    owner = primary if primary is not None else cleanup
+    owner.cleanup_errors = list(getattr(owner, "cleanup_errors", [])) + [{
+        "phase": "client_context", "error_type": type(cleanup).__name__, "error": str(cleanup),
+    }]
+    logger.opt(exception=cleanup).error("Optimizer client cleanup failed")
+
+
+@contextmanager
+def _optimizer_session(
+    factory: OptimizerClientFactory | None,
+    port_size: int,
+) -> Iterator[OptimizerClient | InProcessOptimizerClient | None]:
+    if factory is None:
+        yield None
+        return
+    context = factory()
+    try:
+        client = context.__enter__()
+    except BaseException as primary:
+        # A partially completed handshake must not retain a local socket.
+        try:
+            context.close()
+        except BaseException as cleanup:
+            _record_client_cleanup(primary, cleanup)
+        raise
+    primary = None
+    try:
+        client.validate_capacity(port_size)
+        yield client
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            context.__exit__(type(primary) if primary is not None else None,
+                             primary, primary.__traceback__ if primary is not None else None)
+        except BaseException as cleanup:
+            _record_client_cleanup(primary, cleanup)
+            if primary is None:
+                raise
 
 
 @dataclass(slots=True)
@@ -502,7 +550,7 @@ def _mode_result(
     return _combine_sleeves(long_result, short_result)
 
 
-def _run(optimizer_client: OptimizerClient | None) -> None:
+def _run(optimizer_client_factory: OptimizerClientFactory | None) -> None:
     logger.info("Run directory: {} (config: {})", cfg.RUN_DIR, cfg.CONFIG_PATH)
     needs_short = any(mode != "long_only" for mode in cfg.STRATEGY_MODES)
     if needs_short and not cfg.SHORT_BORROW_SOURCES:
@@ -537,10 +585,11 @@ def _run(optimizer_client: OptimizerClient | None) -> None:
         all_metrics, all_ret, all_cumrets, all_port_sizes, all_closes = {}, {}, {}, {}, {}
         for port_size in cfg.PORT_SIZES:
             logger.info("── {} portfolio size: {} ──", mode, port_size)
-            result = _mode_result(
-                pool, mode, port_size=port_size, output_dir=output_dir,
-                optimizer_client=optimizer_client,
-            )
+            with _optimizer_session(optimizer_client_factory, port_size) as optimizer_client:
+                result = _mode_result(
+                    pool, mode, port_size=port_size, output_dir=output_dir,
+                    optimizer_client=optimizer_client,
+                )
             _write_positions_csv(result.positions, f"{output_dir}positions_{port_size}.csv")
             if result.target_weights is not None:
                 _write_target_weights(
@@ -618,10 +667,9 @@ def run() -> None:
     status_path = cfg.RUN_DIR / "optimizer_run_status.json"
     status_path.write_text(json.dumps({"status": "running", "complete": False}), encoding="utf-8")
     try:
-        # Validate the selected backend before loading external market data.
-        with create_optimizer_client(cfg.OPTIMIZER) as optimizer_client:
-            optimizer_client.validate_capacity(max(cfg.PORT_SIZES))
-            _run(optimizer_client)
+        # Input loading and reporting own no optimizer connection. Each
+        # portfolio enters its own session only when its targets are needed.
+        _run(lambda: create_optimizer_client(cfg.OPTIMIZER))
     except Exception as exc:
         status_path.write_text(json.dumps({
             "status": "failed", "complete": False,

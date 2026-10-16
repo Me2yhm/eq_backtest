@@ -270,11 +270,25 @@ optimizer:
 ```
 
 Relative `optimizer.socket_path` values resolve from the dedicated run directory.
-In shared-memory mode startup performs HELLO, HEALTH, and CAPABILITIES checks.
+Benchmark, market, prediction, and pool loading finish before any optimizer
+client is created. Each portfolio size then opens its own client context; SHM
+performs HELLO, HEALTH, CAPABILITIES, and capacity validation in that context.
+Output views and leases are released before the connection closes. Evaluation,
+CSV/Parquet reporting, and plotting run after that portfolio's client is closed.
+Service availability and capacity errors therefore surface after data loading,
+rather than before it, and still mark the run as failed.
 Unreachable service, timeout, version/model/policy mismatch, malformed handles,
 invalid weights, and late-session identity all fail the experiment with zero
 retry and no HTTP fallback. In-process mode validates the same logical contract
 without socket, memfd, or service lifecycle overhead.
+
+The service allows 30 seconds to complete HELLO. An established session has no
+business idle timeout, so long simulations can retain a finalized arena without
+sending heartbeat messages. The client's `request_timeout_ms` still limits each
+control request; model `timeout_ms` is also unchanged. Clients must close their
+sessions when finished: a stalled process that leaves its socket open can retain
+service resources. Monitor FD/shared-memory usage; configured byte limits remain
+in effect. A lost session fails without reconnecting or replaying requests.
 
 Daily targets are submitted through the backend-neutral `optimize_many` API.
 SHM mode requires explicit `output_arena/1` capability negotiation and retains
@@ -327,7 +341,17 @@ peaks under `RLIMIT_NOFILE=256`:
 uv run python scripts/verify_optimizer_pressure.py long-cli --work-dir /tmp/eq-long-verification --nofile 256
 ```
 
-The current review rework record is
+The slow-path verification records connection, arena consumption, release, and
+reporting times for portfolio sizes 1/2/4/8, then interrupts the final portfolio's
+service to verify failure handling. Use a new work directory:
+
+```bash
+uv run python scripts/verify_optimizer_session_lifetime.py --work-dir /tmp/eq-session-verification --real-default --hold-seconds 31
+```
+
+The current session hardening record is
+[OPTIMIZER_SESSION_HARDENING_VERIFICATION_20261016.md](OPTIMIZER_SESSION_HARDENING_VERIFICATION_20261016.md).
+The previous review rework record is
 [OPTIMIZER_REWORK_VERIFICATION_20261015.md](OPTIMIZER_REWORK_VERIFICATION_20261015.md).
 [OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md](OPTIMIZER_DUAL_MODE_VERIFICATION_20261015.md)
 preserves the initial short-sample acceptance evidence.
@@ -499,6 +523,28 @@ output directory contains:
 | `positions_{N}.csv` | Actual position snapshots with market, eligibility, forecast, weight, sleeve, and SBL audit fields when applicable. |
 | `target_weights_{N}.csv` and `.parquet` | Ideal target-weight snapshots for intraday runs. |
 | `plots_long/`, `plots_short/`, or `plots_long_short/` | Portfolio overview, metrics table, holding-period, and position-size charts. |
+
+`positions.pred` is the raw prediction on the **execution row**. With
+`trade_on_next_bar: true`, it can contain a new prediction that became available
+on the execution date; it is not the score used to prioritize that order's buys.
+Buy priority reads the prediction at `signal_bar_idx` through
+`signal_row_by_symbol`. The execution row supplies tradability, prices, and the
+execution simulation. For example, if signal-day A=4 and B=3 but execution-day
+A=-100 and B=100, A still buys first when cash cannot fund both targets;
+`positions.pred` for A is -100. This applies to both local and optimizer targets.
+
+In optimizer decision audits, `decision_as_of` identifies the signal time and
+`planned_execution_at` identifies its scheduled execution bar. Use those times
+and the signal-row score for decision attribution; treating execution-row `pred`
+as information available at `decision_as_of` would introduce look-ahead bias.
+The existing CSV/Parquet column names are unchanged.
+
+The optimizer integration workflow matches pushes and PR destination branches
+`main` and `5min-old`. It installs the exact Git revision in `uv.lock` with
+`uv sync --frozen`. The private optimizer dependency requires the read-only
+`OPTIMIZER_READ_TOKEN` secret scoped to that repository. If absent, installation
+fails explicitly before any integration tests run. This authorization gap is a
+recorded limitation, not a passing integration result.
 
 ## Development
 

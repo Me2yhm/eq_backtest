@@ -2,9 +2,9 @@ name: Optimizer integration
 
 on:
   push:
-    branches: [5min-old]
+    branches: [main, 5min-old]
   pull_request:
-    branches: [5min-old]
+    branches: [main, 5min-old]
   workflow_dispatch:
 
 permissions:
