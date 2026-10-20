@@ -205,13 +205,22 @@ locally installed and authenticated `rqdatac` package (and optionally
 
 ### Optional optimizer backend (daily long-only)
 
+`max_score/1` is also available as an explicit Schema 1.2 opt-in in both
+in-process and shared-memory modes. It uses a separate sequential shares/cash/NAV
+account path, full eligible candidates plus all actual holdings, explicit budget
+and optional cap/size/industry/turnover constraints. It never inherits the
+equal-weight `port_size` target selection or budget formula. The default remains
+the existing equal-weight path described below. See
+[MAX_SCORE.md](MAX_SCORE.md) for required business settings, exposure providers,
+timing/accounting conventions, limitations and the 25-decision dual CLI verifier.
+
 The optimizer path is off by default and is currently restricted to `daily`,
 `long_only`, `weight_mode: equal`, and next-day execution. When enabled, EQ
 Backtest still selects the rank-band target names, but obtains their final
 weights from the installed `optimizer` package. `optimizer.mode: inprocess`
 is the default and requires no daemon. `optimizer.mode: shared_memory` keeps
 the existing independent shm/1 service for process-isolated deployments. Both
-modes execute the same optimizer core and Schema 1.1 contract. Intraday and
+modes execute the same optimizer core and Schema 1.1 equal-weight contract. Intraday and
 short modes continue to use the local path.
 
 The v0.2 capital policy preserves the existing denominator: if `M` valid target

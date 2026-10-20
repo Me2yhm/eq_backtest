@@ -1,0 +1,64 @@
+# Explicit mapping template. The synthetic verifier generates runnable inputs.
+# All values below are engineering demonstration choices, not production defaults.
+frequency: daily
+strategy_modes: [long_only]
+weight_mode: equal
+port_sizes: [1]
+pool_size: 6000
+freq_config:
+  daily:
+    market_data: market.parquet
+    preds_dir: predictions
+    prediction_sources: [signals.parquet]
+    trade_on_next_bar: true
+optimizer:
+  enabled: true
+  mode: inprocess  # Or shared_memory with a local shm/1 service.
+  schema_version: "1.2"
+  max_assets: 6000
+  model: {type: max_score, version: "1", config: {}}
+  max_score:
+    purpose: engineering_acceptance
+    target_budget: 0.9
+    max_weight: 0.3
+    candidate_policy: finite_score_eligible
+    missing_valuation_policy: error
+    no_signal_policy: error
+    source_point_in_time_status: unverified
+    price_convention: engineering_unverified
+    turnover_constraint: {definition: stock_half_l1, limit: 0.5}
+    size_constraint:
+      lower: -0.15
+      upper: 0.15
+      source:
+        path: exposures/size.parquet
+        date_column: date
+        symbol_column: symbol
+        value_column: factor_value
+        available_at_column: null
+        metadata:
+          exposure_id: raw_SIZE_v3_0
+          source: explicitly_selected_SIZE_source
+          version: v3_0
+          units: raw_factor
+          transformation: identity
+          semantic_status: economic_definition_unverified
+    industry_constraint:
+      bounds:
+        - {industry_id: "1", lower: 0.35, upper: 0.55}
+        - {industry_id: "2", lower: 0.35, upper: 0.55}
+      source:
+        path: exposures/industry.parquet
+        date_column: date
+        symbol_column: symbol
+        value_column: industry_code
+        available_at_column: null
+        metadata:
+          exposure_id: explicit_industry_level
+          source: explicitly_selected_industry_source
+          version: declared_source_version
+          units: category
+          transformation: identity
+          semantic_status: source_named_history_unverified
+          classification: explicitly_selected_classification
+          level: "1"

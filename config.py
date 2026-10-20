@@ -109,6 +109,20 @@ _DEFAULTS: dict = {
         "max_shared_bytes": 268435456,
         "failure_policy": "fail",
         "max_retries": 0,
+        # Opt-in max_score business choices have no implicit investment defaults.
+        "max_score": {
+            "purpose": None,
+            "target_budget": None,
+            "max_weight": None,
+            "size_constraint": None,
+            "industry_constraint": None,
+            "turnover_constraint": None,
+            "candidate_policy": None,
+            "missing_valuation_policy": None,
+            "no_signal_policy": None,
+            "source_point_in_time_status": None,
+            "price_convention": None,
+        },
     },
 }
 
@@ -176,6 +190,17 @@ def _convert_paths(cfg: dict) -> dict:
     optimizer = cfg.get("optimizer")
     if isinstance(optimizer, dict) and isinstance(optimizer.get("socket_path"), (str, Path)):
         optimizer["socket_path"] = _resolve_config_path(optimizer["socket_path"])
+    if isinstance(optimizer, dict) and isinstance(optimizer.get("max_score"), dict):
+        for name in ("size_constraint", "industry_constraint"):
+            constraint = optimizer["max_score"].get(name)
+            if not isinstance(constraint, dict) or not isinstance(constraint.get("source"), dict):
+                continue
+            source = constraint["source"]
+            if isinstance(source.get("path"), (str, Path)):
+                source["path"] = _resolve_config_path(source["path"])
+            if isinstance(source.get("paths"), list):
+                source["paths"] = [_resolve_config_path(p) if isinstance(p, (str, Path)) else p
+                                   for p in source["paths"]]
     return cfg
 
 
@@ -226,6 +251,7 @@ def _optimizer_config(raw: object) -> dict:
         "socket_path", "backend", "zero_copy", "schema_version", "model",
         "timeout_ms", "request_timeout_ms", "max_inflight_per_session",
         "max_control_bytes", "max_shared_bytes", "failure_policy", "max_retries",
+        "max_score",
     }
     unknown = set(raw).difference(allowed)
     if unknown:
@@ -246,13 +272,26 @@ def _optimizer_config(raw: object) -> dict:
     if raw["request_timeout_ms"] < raw["timeout_ms"]:
         raise ValueError("optimizer.request_timeout_ms must be >= optimizer.timeout_ms")
 
-    if raw.get("schema_version") != "1.1":
-        raise ValueError("optimizer.schema_version must be '1.1'")
     if raw.get("failure_policy") != "fail" or raw.get("max_retries") != 0:
         raise ValueError("optimizer currently requires failure_policy='fail' and max_retries=0")
     model = raw.get("model")
-    if model != {"type": "equal_weight", "version": "1", "config": {}}:
-        raise ValueError("optimizer.model must be equal_weight/1 with empty config")
+    if not isinstance(model, dict) or set(model) != {"type", "version", "config"}:
+        raise ValueError("optimizer.model requires type, version, config")
+    if model["type"] == "equal_weight":
+        if model != {"type": "equal_weight", "version": "1", "config": {}}:
+            raise ValueError("optimizer.model must be equal_weight/1 with empty config")
+        if raw.get("schema_version") != "1.1":
+            raise ValueError("equal_weight optimizer.schema_version must be '1.1'")
+    elif model["type"] == "max_score":
+        if model["version"] != "1" or model["config"] != {}:
+            raise ValueError("max_score/1 model.config must be empty")
+        if raw.get("schema_version") != "1.2":
+            raise ValueError("max_score optimizer.schema_version must be '1.2'")
+        from max_score_config import validate_max_score_settings
+
+        validate_max_score_settings(raw.get("max_score"))
+    else:
+        raise ValueError("optimizer.model must be equal_weight/1 or max_score/1")
 
     if not enabled or mode == "inprocess":
         return raw
@@ -365,6 +404,6 @@ if OPTIMIZER["enabled"]:
     if FREQUENCY != "daily" or STRATEGY_MODES != ("long_only",):
         raise ValueError("optimizer is currently supported only for daily + long_only")
     if WEIGHT_MODE != "equal":
-        raise ValueError("optimizer equal_weight integration requires weight_mode='equal'")
+        raise ValueError("optimizer integration requires weight_mode='equal'; model chooses weights")
     if not trade_on_next_bar_for(FREQUENCY):
         raise ValueError("optimizer daily integration requires trade_on_next_bar=true")

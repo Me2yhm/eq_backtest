@@ -511,6 +511,16 @@ def _mode_result(
         "thresh_out_buffer": cfg.THRESH_OUT_BUFFER,
     }
     if mode == "long_only":
+        if optimizer_client is not None and cfg.OPTIMIZER["model"].get("type") == "max_score":
+            from max_score_backtest import generate_max_score_portfolio
+
+            return _with_sleeve(generate_max_score_portfolio(
+                pool, optimizer_client, settings=cfg.OPTIMIZER["max_score"],
+                model=cfg.OPTIMIZER["model"], portfolio_id=f"long:{port_size}",
+                portfolio_label=port_size, size_cut=cfg.POOL_SIZE,
+                timeout_ms=cfg.OPTIMIZER["timeout_ms"], initial_value=cfg.PORTFOLIO_INITIAL_VALUE,
+                cost_per_turnover=cfg.COST_PER_TURNOVER, output_dir=output_dir,
+            ), "long")
         optimizer_plan = None
         if optimizer_client is not None:
             optimizer_plan = prepare_optimizer_targets(
