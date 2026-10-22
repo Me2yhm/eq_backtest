@@ -117,16 +117,16 @@ shares/weights, decision marks and raw signal scores alongside target weights.
 data error, solver error and empty-book hold. Failures stop the run without
 fallback/retry and leave `optimizer_run_status.json` incomplete.
 
-Install the sibling optimizer checkout with its optional LP dependencies in an
-isolated environment, or use a locally built wheel. The checked-in dependency
-pin is the last published equal-weight revision, so `uv sync` can restore that
-older package. For local source verification, explicitly supply the sibling
-source on `PYTHONPATH`; replace the example paths below for your local checkout.
-Do not publish private data paths or invent a remotely available unpushed SHA.
+The formal dependency is `optimizer[lp]` at the merged Git SHA
+`3ffc0e128799379aa37c61bbb7ada900eac6952f`, with SciPy included in `uv.lock`.
+Use a new environment and `uv sync --frozen`, then verify the installed Git
+identity from outside both repositories as described in
+[MAX_SCORE_LOCAL_VALIDATION.md](MAX_SCORE_LOCAL_VALIDATION.md). With
+`TASK_ROOT/venv` created by that procedure, run from the EQ checkout:
 
 ```bash
-PYTHONPATH=../optimizer .venv/bin/python -m unittest discover -s tests -p test_max_score_integration.py -v
-PYTHONPATH=../optimizer .venv/bin/python scripts/verify_max_score_modes.py --work-dir /tmp/new-max-score-verification
+PYTHONPATH= "$TASK_ROOT/venv/bin/python" -m unittest discover -s tests -p test_max_score_integration.py -v
+PYTHONPATH= "$TASK_ROOT/venv/bin/python" scripts/verify_max_score_modes.py --work-dir /tmp/new-max-score-verification
 ```
 
 The second command creates fixed synthetic inputs, 25 consecutive decisions

@@ -1,12 +1,42 @@
-# Local source and wheel verification
+# Frozen dependency and local verification
 
-Both repositories must be checked out at their reviewed local max_score branches.
-The EQ lock continues to pin the last published optimizer revision; an ordinary
-`uv sync` can replace the locally tested optimizer. No unpushed SHA is presented
-as remotely installable. Use an explicit local install and `--no-sync`, or the
-interpreter directly. These commands never connect to a trading system.
+EQ declares `optimizer[lp]` at the merged optimizer Git SHA
+`3ffc0e128799379aa37c61bbb7ada900eac6952f`; `uv.lock` includes SciPy through the
+LP extra. Package version `0.2.0` alone does not identify this revision. The
+default model remains `equal_weight/1`; `max_score/1` requires explicit config.
 
-From the optimizer checkout, with a new isolated environment:
+For integration acceptance, run from the EQ checkout with GitHub SSH access and
+a new environment. Do not install additional packages into this environment or
+override optimizer through `PYTHONPATH`:
+
+```bash
+TASK_ROOT=$(mktemp -d /tmp/eq-frozen.XXXXXX)
+uv lock --check
+PYTHONPATH= UV_PROJECT_ENVIRONMENT="$TASK_ROOT/venv" uv sync --frozen
+(
+    cd "$TASK_ROOT"
+    "$TASK_ROOT/venv/bin/python" -I -c 'import importlib.metadata as m, optimizer, scipy; print(optimizer.__file__); print(scipy.__version__); print(m.distribution("optimizer").read_text("direct_url.json"))'
+)
+RUN_OPTIMIZER_IPC_TESTS=1 PYTHONPATH= "$TASK_ROOT/venv/bin/python" -m unittest discover -s tests -v
+PYTHONPATH= "$TASK_ROOT/venv/bin/python" scripts/verify_optimizer_modes.py --work-dir "$TASK_ROOT/equal-dual"
+PYTHONPATH= "$TASK_ROOT/venv/bin/python" scripts/verify_max_score_modes.py --work-dir "$TASK_ROOT/max-dual"
+```
+
+Check that optimizer imports from the new environment's `site-packages`, its
+`direct_url.json` has both `commit_id` and `requested_revision` equal to the full
+SHA above, and SciPy is installed. Record Python and dependency versions and
+compare the installed optimizer package files with that commit. A lock check
+establishes manifest consistency; `--frozen` itself uses the existing lock
+without checking whether it matches changed project metadata. Linux native
+tests require Unix socket and memfd permissions; record any skips as untested.
+The dual-mode scripts retain synthetic fixtures, logs and output comparisons.
+For a historical compatibility claim, additionally compare both equal-weight
+runs with the archived baseline using exact numeric equality; the scripts'
+cross-mode comparison alone does not establish that claim.
+
+Source and wheel checks below are optional development checks, separate from
+the frozen Git installation above. From the optimizer checkout, use another
+new environment:
 
 ```bash
 uv venv /tmp/max-score-local-env
@@ -22,24 +52,6 @@ Build a wheel from the reviewed checkout using `python -m build --wheel` (the
 `build` package is a development tool). Install that wheel in a third environment
 and run the smoke check from outside both repositories. Test both the base wheel
 and that wheel with SciPy installed. Record its SHA-256 and imported package path.
-
-For a complete EQ environment, the existing EQ virtual environment can be used
-without synchronizing its SSH pin:
-
-```bash
-# From eq-backtest; install the sibling checkout, never its remote pin.
-uv pip install --python .venv/bin/python -e '../optimizer[lp]'
-.venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python scripts/verify_optimizer_modes.py --work-dir /tmp/new-equal-dual
-.venv/bin/python scripts/verify_max_score_modes.py --work-dir /tmp/new-max-dual
-.venv/bin/python scripts/verify_optimizer_pressure.py long-cli --work-dir /tmp/new-equal-pressure --nofile 256
-```
-
-Alternatively, use `PYTHONPATH=/path/to/local/optimizer` with the EQ interpreter
-and its explicitly installed SciPy extra. The acceptance manifest records which
-method was used; source-path invocation is separate from wheel installation.
-Linux tests need local Unix socket and memfd permissions. Set
-`RUN_OPTIMIZER_IPC_TESTS=1` to include the opt-in legacy CLI/pressure tests.
 
 From optimizer, the bounded full-market command is:
 
@@ -62,6 +74,6 @@ and dates selected before optimization. Output contains private paths and must
 remain local. It does not certify historical publication, eligibility, execution
 price semantics or real-account history.
 
-Publishing a release, replacing the remote dependency pin, pushing, merging and
-production parameter approval remain separate actions. None occurs in these
-commands.
+Publishing a release, pushing, merging and production parameter approval remain
+separate actions. These verification commands use synthetic fixtures or explicitly
+selected read-only snapshots and do not connect to a trading system.

@@ -331,8 +331,11 @@ uv run python scripts/benchmark_optimizer.py --mode both --socket /absolute/run/
 
 The first request is treated as warm-up. The report separates control wait from
 service model time and reports shared payload and transport-copy bytes.
-The optimizer SSH Git dependency and `uv.lock` pin the validated revision; ordinary
-syncs retain that exact code. Use `--mode inprocess` for a benchmark without a
+The `optimizer[lp]` SSH Git dependency and `uv.lock` pin merged revision
+`3ffc0e128799379aa37c61bbb7ada900eac6952f` and include SciPy for `max_score/1`.
+Equal-weight remains the default. See [MAX_SCORE_LOCAL_VALIDATION.md](MAX_SCORE_LOCAL_VALIDATION.md)
+for fresh `uv sync --frozen` installation and source identity checks.
+Use `--mode inprocess` for a benchmark without a
 service. A real CLI comparison with fixed synthetic inputs, isolated run configs,
 failure checks, and a JSON difference report is available without market data:
 
